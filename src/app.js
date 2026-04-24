@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash'})
 
 // Middleware
 app.use(cors());
@@ -50,7 +50,7 @@ wss.on('connection', (ws, req) => {
   ws.on('message', async (data) => {
     try {
       const message = JSON.parse(data.toString());
-      console.log('Received:', message.type);
+      console.log('Received:', message.type, '- Full message:', JSON.stringify(message));
 
       if (message.type === 'start_call') {
         // Handle call start
@@ -69,11 +69,27 @@ wss.on('connection', (ws, req) => {
 
       } else if (message.type === 'stream_request') {
         // Handle user message
-        const streamId = message.data.stream_id;
-        const transcript = message.data.transcript;
+        const streamId = message.data?.stream_id || message.stream_id;
+        
+        // Handle different transcript formats
+        let userMessage = '';
+        const transcript = message.data?.transcript || message.transcript;
+        
+        if (Array.isArray(transcript)) {
+          // Array format: [{content: "..."}]
+          userMessage = transcript[transcript.length - 1]?.content || '';
+        } else if (typeof transcript === 'string') {
+          // String format: "user message"
+          userMessage = transcript;
+        } else if (message.data?.text) {
+          // Text format: {text: "..."}
+          userMessage = message.data.text;
+        } else if (message.data?.content) {
+          // Direct content: {content: "..."}
+          userMessage = message.data.content;
+        }
 
-        if (transcript && transcript.length > 0) {
-          const userMessage = transcript[transcript.length - 1].content;
+        if (userMessage) {
           console.log('User message:', userMessage);
 
           // Generate response using Gemini
@@ -82,14 +98,17 @@ wss.on('connection', (ws, req) => {
             const response = await result.response;
             const text = response.text();
 
-            // Send response back to Millis AI
+            // Send response back to Millis AI - support multiple formats
+            const responseData = {
+              stream_id: streamId,
+              content: text,
+              end_of_stream: true
+            };
+            
+            // Try different response formats Millis might expect
             ws.send(JSON.stringify({
               type: 'stream_response',
-              data: {
-                stream_id: streamId,
-                content: text,
-                end_of_stream: true
-              }
+              data: responseData
             }));
 
           } catch (error) {
