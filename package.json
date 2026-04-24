@@ -1,0 +1,23 @@
+{
+  "name": "custom-llm-backend",
+  "version": "1.0.0",
+  "description": "A simple Node.js backend for Custom LLM",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js"
+  },
+  "keywords": ["backend", "nodejs", "express"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "ws": "^8.14.2",
+    "@google/generative-ai": "^0.21.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
