@@ -9,7 +9,15 @@ const PORT = process.env.PORT || 3000;
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash'})
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+// Generation configuration for better responses
+const generationConfig = {
+  temperature: 0.7,
+  topP: 0.9,
+  topK: 40,
+  maxOutputTokens: 2048,
+};
 
 // Custom system prompt - defines what your LLM does
 const SYSTEM_PROMPT = `🎙 तत्काल वॉइस एजेंट - आशीष नर्सिंग होम
@@ -559,35 +567,49 @@ wss.on('connection', (ws, req) => {
           try {
             const result = await model.generateContent({
               contents: [{ role: 'user', parts: [{ text: userMessage }] }],
-              systemInstruction: { role: 'user', parts: [{ text: SYSTEM_PROMPT }] }
+              systemInstruction: { role: 'system', parts: [{ text: SYSTEM_PROMPT }] },
+              generationConfig: generationConfig
             });
             const response = await result.response;
-            const text = response.text();
+            let text = response.text();
 
-            // Send response back to Millis AI - support multiple formats
-            const responseData = {
-              stream_id: streamId,
-              content: text,
-              end_of_stream: true
-            };
-            
-            // Try different response formats Millis might expect
-            ws.send(JSON.stringify({
-              type: 'stream_response',
-              data: responseData
-            }));
+            // Validate response is not empty
+            if (!text || text.trim() === '') {
+              text = 'मुझे खेद है, कृपया फिर से बोलिए।';
+            }
 
-          } catch (error) {
-            console.error('Gemini API error:', error);
+            // Send response back to Millis AI
             ws.send(JSON.stringify({
               type: 'stream_response',
               data: {
                 stream_id: streamId,
-                content: 'Sorry, I encountered an error processing your request.',
+                content: text,
+                end_of_stream: true
+              }
+            }));
+
+          } catch (error) {
+            console.error('Gemini API error:', error);
+            // Send fallback response in Hindi
+            ws.send(JSON.stringify({
+              type: 'stream_response',
+              data: {
+                stream_id: streamId,
+                content: 'नमस्ते, मैं आशीष नर्सिंग होम से बोल रही हूं। आपको कौनसे डॉक्टर के साथ और कब का नंबर लगाना है?',
                 end_of_stream: true
               }
             }));
           }
+        } else {
+          // No user message - send greeting
+          ws.send(JSON.stringify({
+            type: 'stream_response',
+            data: {
+              stream_id: streamId,
+              content: 'नमस्ते, मैं आशीष नर्सिंग होम से रिया बोल रही हूं। आपको कौनसे डॉक्टर के साथ और कब का नंबर लगाना है?',
+              end_of_stream: true
+            }
+          }));
         }
       }
 
