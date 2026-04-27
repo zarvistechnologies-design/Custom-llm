@@ -543,10 +543,13 @@ wss.on('connection', (ws, req) => {
         const greeting = 'नमस्ते, मैं आशीष नर्सिंग होम से रिया बोल रही हूं। आपको कौनसे डॉक्टर के साथ और कब का नंबर लगाना है?';
 
         // Seed a chat session for this stream so subsequent turns have
-        // context. Pre-loading the greeting as the model's first turn
-        // keeps history consistent with what the caller actually heard.
+        // context. Gemini requires history to start with a user turn,
+        // so we prepend a synthetic call-connect event before the greeting.
         const chat = model.startChat({
-          history: [{ role: 'model', parts: [{ text: greeting }] }],
+          history: [
+            { role: 'user', parts: [{ text: '[Call connected]' }] },
+            { role: 'model', parts: [{ text: greeting }] },
+          ],
         });
         conversations.set(streamId, chat);
 
