@@ -18,10 +18,10 @@ const generationConfig = {
   maxOutputTokens: 2048,
 };
 
-// Per-stream conversation history so the bot follows the multi-turn flow
-// (greeting → doctor → date → time → name → book). Without this every
-// turn is isolated and the system prompt's step-by-step logic breaks.
-const conversations = new Map();
+// Millis AI sends the full conversation transcript with every stream_request,
+// so we use that as the single source of truth instead of tracking our own
+// history (which previously drifted out of sync and caused the bot to re-greet
+// mid-call).
 
 // Custom system prompt - defines what your LLM does
 const SYSTEM_PROMPT = `🎙 तत्काल वॉइस एजेंट - आशीष नर्सिंग होम
@@ -536,101 +536,85 @@ wss.on('connection', (ws, req) => {
       console.log('Received:', message.type, '- Full message:', JSON.stringify(message));
 
       if (message.type === 'start_call') {
-        // Handle call start
         const streamId = message.data.stream_id;
         console.log('Call started with stream ID:', streamId);
 
-        const greeting = 'नमस्ते, मैं आशीष नर्सिंग होम से रिया बोल रही हूं। आपको कौनसे डॉक्टर के साथ और कब का नंबर लगाना है?';
-
-        // Seed a chat session for this stream so subsequent turns have
-        // context. Gemini requires history to start with a user turn,
-        // so we prepend a synthetic call-connect event before the greeting.
-        const chat = model.startChat({
-          history: [
-            { role: 'user', parts: [{ text: '[Call connected]' }] },
-            { role: 'model', parts: [{ text: greeting }] },
-          ],
-        });
-        conversations.set(streamId, chat);
-
+        // Hardcoded greeting matches the SYSTEM_PROMPT's required opening.
+        // Millis records this in its transcript and replays it to us in
+        // every subsequent stream_request, so the model stays in sync.
         ws.send(JSON.stringify({
           type: 'stream_response',
           data: {
             stream_id: streamId,
-            content: greeting,
+            content: 'नमस्ते, मैं आशीष नर्सिंग होम से रिया बोल रही हूं। आपको कौनसे डॉक्टर के साथ और कब का नंबर लगाना है?',
             end_of_stream: true
           }
         }));
 
       } else if (message.type === 'stream_request') {
-        // Handle user message
-        const streamId = message.data?.stream_id || message.stream_id;
+        const streamId = message.data?.stream_id ?? message.stream_id;
+        const transcript = message.data?.transcript;
 
-        // Handle different transcript formats
-        let userMessage = '';
-        const transcript = message.data?.transcript || message.transcript;
-
-        if (Array.isArray(transcript)) {
-          userMessage = transcript[transcript.length - 1]?.content || '';
-        } else if (typeof transcript === 'string') {
-          userMessage = transcript;
-        } else if (message.data?.text) {
-          userMessage = message.data.text;
-        } else if (message.data?.content) {
-          userMessage = message.data.content;
+        if (!Array.isArray(transcript) || transcript.length === 0) {
+          console.warn('stream_request without usable transcript:', JSON.stringify(message));
+          return;
         }
 
-        if (userMessage) {
-          console.log('User message:', userMessage);
+        // Last entry should be the user's latest utterance.
+        const last = transcript[transcript.length - 1];
+        const userMessage = last?.role === 'user' ? (last.content || '') : '';
+        if (!userMessage) {
+          console.warn('Last transcript entry is not a user message:', JSON.stringify(last));
+          return;
+        }
+        console.log('User message:', userMessage);
 
-          try {
-            // Reuse the chat for this stream (or start one if start_call was missed)
-            let chat = conversations.get(streamId);
-            if (!chat) {
-              chat = model.startChat({ history: [] });
-              conversations.set(streamId, chat);
-            }
+        // Convert Millis transcript (excluding the last user turn, which we
+        // pass to sendMessage) into Gemini chat history format.
+        // Millis: { role: 'user' | 'assistant', content: string }
+        // Gemini: { role: 'user' | 'model',     parts: [{ text: string }] }
+        let history = transcript.slice(0, -1).map((m) => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content || '' }],
+        }));
 
-            const result = await chat.sendMessage(userMessage);
-            let text = result.response.text();
+        // Gemini requires history to start with a user turn. Millis starts
+        // with the assistant greeting, so prepend a synthetic user turn.
+        if (history.length > 0 && history[0].role === 'model') {
+          history = [
+            { role: 'user', parts: [{ text: '[Call connected]' }] },
+            ...history,
+          ];
+        }
 
-            if (!text || text.trim() === '') {
-              text = 'मुझे खेद है, कृपया फिर से बोलिए।';
-            }
+        try {
+          const chat = model.startChat({ history });
+          const result = await chat.sendMessage(userMessage);
+          let text = result.response.text();
 
-            ws.send(JSON.stringify({
-              type: 'stream_response',
-              data: {
-                stream_id: streamId,
-                content: text,
-                end_of_stream: true
-              }
-            }));
-
-          } catch (error) {
-            console.error('Gemini API error:', error);
-            ws.send(JSON.stringify({
-              type: 'stream_response',
-              data: {
-                stream_id: streamId,
-                content: 'मुझे खेद है, कृपया फिर से बोलिए।',
-                end_of_stream: true
-              }
-            }));
+          if (!text || text.trim() === '') {
+            text = 'मुझे खेद है, कृपया फिर से बोलिए।';
           }
-        } else {
+
           ws.send(JSON.stringify({
             type: 'stream_response',
             data: {
               stream_id: streamId,
-              content: 'नमस्ते, मैं आशीष नर्सिंग होम से रिया बोल रही हूं। आपको कौनसे डॉक्टर के साथ और कब का नंबर लगाना है?',
+              content: text,
+              end_of_stream: true
+            }
+          }));
+        } catch (error) {
+          console.error('Gemini API error:', error);
+          ws.send(JSON.stringify({
+            type: 'stream_response',
+            data: {
+              stream_id: streamId,
+              content: 'मुझे खेद है, कृपया फिर से बोलिए।',
               end_of_stream: true
             }
           }));
         }
-      } else if (message.type === 'end_call' || message.type === 'call_end') {
-        const streamId = message.data?.stream_id || message.stream_id;
-        if (streamId) conversations.delete(streamId);
       }
 
     } catch (error) {
