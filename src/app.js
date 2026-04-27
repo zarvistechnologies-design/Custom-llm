@@ -9,7 +9,6 @@ const PORT = process.env.PORT || 3000;
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
 // Generation configuration for better responses
 const generationConfig = {
@@ -18,6 +17,11 @@ const generationConfig = {
   topK: 40,
   maxOutputTokens: 2048,
 };
+
+// Per-stream conversation history so the bot follows the multi-turn flow
+// (greeting → doctor → date → time → name → book). Without this every
+// turn is isolated and the system prompt's step-by-step logic breaks.
+const conversations = new Map();
 
 // Custom system prompt - defines what your LLM does
 const SYSTEM_PROMPT = `🎙 तत्काल वॉइस एजेंट - आशीष नर्सिंग होम
@@ -482,6 +486,14 @@ efficiently उनकी help करती हैं
 
 आशीष नर्सिंग होम - आपकी सेहत, हमारी प्राथमिकता 💙`;
 
+// Initialize model WITH system instruction baked in — most reliable
+// way for gemini-2.0-flash to actually honor the prompt every turn.
+const model = genAI.getGenerativeModel({
+  model: 'gemini-2.5-flash',
+  systemInstruction: SYSTEM_PROMPT,
+  generationConfig: generationConfig,
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -528,12 +540,21 @@ wss.on('connection', (ws, req) => {
         const streamId = message.data.stream_id;
         console.log('Call started with stream ID:', streamId);
 
-        // Send initial greeting
+        const greeting = 'नमस्ते, मैं आशीष नर्सिंग होम से रिया बोल रही हूं। आपको कौनसे डॉक्टर के साथ और कब का नंबर लगाना है?';
+
+        // Seed a chat session for this stream so subsequent turns have
+        // context. Pre-loading the greeting as the model's first turn
+        // keeps history consistent with what the caller actually heard.
+        const chat = model.startChat({
+          history: [{ role: 'model', parts: [{ text: greeting }] }],
+        });
+        conversations.set(streamId, chat);
+
         ws.send(JSON.stringify({
           type: 'stream_response',
           data: {
             stream_id: streamId,
-            content: 'Hello! How can I help you today?',
+            content: greeting,
             end_of_stream: true
           }
         }));
@@ -541,44 +562,39 @@ wss.on('connection', (ws, req) => {
       } else if (message.type === 'stream_request') {
         // Handle user message
         const streamId = message.data?.stream_id || message.stream_id;
-        
+
         // Handle different transcript formats
         let userMessage = '';
         const transcript = message.data?.transcript || message.transcript;
-        
+
         if (Array.isArray(transcript)) {
-          // Array format: [{content: "..."}]
           userMessage = transcript[transcript.length - 1]?.content || '';
         } else if (typeof transcript === 'string') {
-          // String format: "user message"
           userMessage = transcript;
         } else if (message.data?.text) {
-          // Text format: {text: "..."}
           userMessage = message.data.text;
         } else if (message.data?.content) {
-          // Direct content: {content: "..."}
           userMessage = message.data.content;
         }
 
         if (userMessage) {
           console.log('User message:', userMessage);
 
-          // Generate response using Gemini with system prompt
           try {
-            const result = await model.generateContent({
-              contents: [{ role: 'user', parts: [{ text: userMessage }] }],
-              systemInstruction: { role: 'system', parts: [{ text: SYSTEM_PROMPT }] },
-              generationConfig: generationConfig
-            });
-            const response = await result.response;
-            let text = response.text();
+            // Reuse the chat for this stream (or start one if start_call was missed)
+            let chat = conversations.get(streamId);
+            if (!chat) {
+              chat = model.startChat({ history: [] });
+              conversations.set(streamId, chat);
+            }
 
-            // Validate response is not empty
+            const result = await chat.sendMessage(userMessage);
+            let text = result.response.text();
+
             if (!text || text.trim() === '') {
               text = 'मुझे खेद है, कृपया फिर से बोलिए।';
             }
 
-            // Send response back to Millis AI
             ws.send(JSON.stringify({
               type: 'stream_response',
               data: {
@@ -590,18 +606,16 @@ wss.on('connection', (ws, req) => {
 
           } catch (error) {
             console.error('Gemini API error:', error);
-            // Send fallback response in Hindi
             ws.send(JSON.stringify({
               type: 'stream_response',
               data: {
                 stream_id: streamId,
-                content: 'नमस्ते, मैं आशीष नर्सिंग होम से बोल रही हूं। आपको कौनसे डॉक्टर के साथ और कब का नंबर लगाना है?',
+                content: 'मुझे खेद है, कृपया फिर से बोलिए।',
                 end_of_stream: true
               }
             }));
           }
         } else {
-          // No user message - send greeting
           ws.send(JSON.stringify({
             type: 'stream_response',
             data: {
@@ -611,6 +625,9 @@ wss.on('connection', (ws, req) => {
             }
           }));
         }
+      } else if (message.type === 'end_call' || message.type === 'call_end') {
+        const streamId = message.data?.stream_id || message.stream_id;
+        if (streamId) conversations.delete(streamId);
       }
 
     } catch (error) {
