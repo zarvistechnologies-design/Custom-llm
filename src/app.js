@@ -487,9 +487,9 @@ efficiently उनकी help करती हैं
 आशीष नर्सिंग होम - आपकी सेहत, हमारी प्राथमिकता 💙`;
 
 // Initialize model WITH system instruction baked in — most reliable
-// way for gemini-2.0-flash to actually honor the prompt every turn.
+// way for -2.0-flash to actually honor the prompt every turn.
 const model = genAI.getGenerativeModel({
-  model: 'gemini-3.1-flash',
+  model: 'gemini-2.5-flash',
   systemInstruction: SYSTEM_PROMPT,
   generationConfig: generationConfig,
 });
