@@ -407,6 +407,8 @@ const model = genAI.getGenerativeModel({
 
 // ============================================================
 // TOOL EXECUTOR — runs the actual webhook
+// Sends FROM number (caller) and TO number (clinic) under MULTIPLE
+// naming conventions so your endpoint can pick whichever it expects.
 // ============================================================
 async function executeTool(name, args, callContext) {
   console.log(`[TOOL CALL] ${name}`, args, 'context:', callContext);
@@ -414,18 +416,38 @@ async function executeTool(name, args, callContext) {
   if (name === 'book_appointment') {
     try {
       const payload = {
+        // ===== Appointment details from the model =====
         patient_name: args.patient_name,
         doctor_name: args.doctor_name,
         appointment_date: args.appointment_date,
         appointment_time: args.appointment_time,
-        // Phone numbers injected from Millis call context — model never sees them
+
+        // ===== FROM phone (caller / patient) =====
+        // Sent under multiple names — your endpoint can use whichever
+        FromPhone: callContext.from_phone,
+        from_phone: callContext.from_phone,
+        fromPhone: callContext.from_phone,
+        from: callContext.from_phone,
         patient_phone: callContext.from_phone,
+        patientPhone: callContext.from_phone,
+        caller_number: callContext.from_phone,
+
+        // ===== TO phone (clinic / called number) =====
+        ToPhone: callContext.to_phone,
+        to_phone: callContext.to_phone,
+        toPhone: callContext.to_phone,
+        to: callContext.to_phone,
         clinic_phone: callContext.to_phone,
+        clinicPhone: callContext.to_phone,
+        assignedPhoneNumber: callContext.to_phone,
+        called_number: callContext.to_phone,
+
+        // ===== Session metadata =====
         session_id: callContext.session_id,
         call_id: callContext.call_id,
       };
 
-      console.log('[BOOK_APPOINTMENT] POST payload:', payload);
+      console.log('[BOOK_APPOINTMENT] POST payload:', JSON.stringify(payload, null, 2));
 
       const response = await axios.post(BOOK_APPOINTMENT_URL, payload, {
         headers: { 'Content-Type': 'application/json' },
@@ -485,15 +507,33 @@ wss.on('connection', (ws, req) => {
       console.log('Received:', message.type);
 
       // ----------------------------------------------------------
-      // START_CALL
+      // START_CALL — capture phone numbers
       // ----------------------------------------------------------
       if (message.type === 'start_call') {
         const d = message.data || {};
         // Log full payload once so you can verify exact field names
         console.log('[START_CALL] Raw payload:', JSON.stringify(message, null, 2));
 
-        callContext.from_phone = d.from_phone || d.from || null;
-        callContext.to_phone = d.to_phone || d.to || null;
+        // Try multiple possible field names for FROM (caller) phone
+        callContext.from_phone =
+          d.from_phone ||
+          d.from ||
+          d.FromPhone ||
+          d.fromPhone ||
+          d.caller_number ||
+          d.caller ||
+          null;
+
+        // Try multiple possible field names for TO (clinic) phone
+        callContext.to_phone =
+          d.to_phone ||
+          d.to ||
+          d.ToPhone ||
+          d.toPhone ||
+          d.called_number ||
+          d.assignedPhoneNumber ||
+          null;
+
         callContext.session_id = d.session_id || null;
         callContext.call_id = d.call_id || null;
         callContext.metadata = d.metadata || {};
