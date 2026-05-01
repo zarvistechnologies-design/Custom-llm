@@ -19,7 +19,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // ⚡ OPTIMIZATION 1: Lower maxOutputTokens + temperature for faster response
 const generationConfig = {
-  temperature: 0.4,           // was 0.7 — lower = faster + consistent
+  temperature: 0.6,           // was 0.7 — lower = faster + consistent
   topP: 0.8,
   topK: 20,
   maxOutputTokens: 1024,       // was 2048 — saves ~250-300ms per turn
@@ -314,7 +314,7 @@ const tools = [
 // ⚡ OPTIMIZATION 2: Faster Gemini model
 // ============================================================
 const model = genAI.getGenerativeModel({
-  model: 'gemini-2.5-flash-lite',   // was gemini-2.5-flash — ~2x faster
+  model: 'gemini-2.5-flash',   // was gemini-2.5-flash — ~2x faster
   systemInstruction: SYSTEM_PROMPT,
   generationConfig,
   tools,
