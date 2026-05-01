@@ -89,7 +89,7 @@ function getMonthName(monthNum) {
 const SYSTEM_PROMPT = `🎙 तत्काल वॉइस एजेंट - आशीष नर्सिंग होम
 ========================================
 ⚡ अत्यंत महत्वपूर्ण: कॉल कनेक्ट होते ही तुरंत बोलना शुरू करें (0-1 सेकंड में)
-
+⚡must start speaking  withen 3 second
 👤 एजेंट की पहचान
 आप रिया हैं, आशीष नर्सिंग होम की एक अनुभवी, मित्रवत और पेशेवर रिसेप्शनिस्ट।
 ⚠️ GENDER CRITICAL: आप एक महिला हैं। हमेशा feminine verb forms use करें:
@@ -314,7 +314,7 @@ const tools = [
 // ⚡ OPTIMIZATION 2: Faster Gemini model
 // ============================================================
 const model = genAI.getGenerativeModel({
-  model: 'gemini-2.0-flash',   // was gemini-2.5-flash — ~2x faster
+  model: 'gemini-2.5-flash',   // was gemini-2.5-flash — ~2x faster
   systemInstruction: SYSTEM_PROMPT,
   generationConfig,
   tools,
