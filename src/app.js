@@ -18,7 +18,7 @@ const BOOK_APPOINTMENT_URL =
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const generationConfig = {
-  temperature: 0.7,
+  temperature: 0.5,
   topP: 0.9,
   topK: 40,
   maxOutputTokens: 2048,
@@ -378,7 +378,7 @@ const tools = [
 // MODEL
 // ============================================================
 const model = genAI.getGenerativeModel({
-  model: 'gemini-2.5-flash',
+  model: 'gemini-2.5-flash-lite',
   systemInstruction: SYSTEM_PROMPT,
   generationConfig,
   tools,
