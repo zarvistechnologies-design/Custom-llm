@@ -314,7 +314,7 @@ const tools = [
 // ⚡ OPTIMIZATION 2: Faster Gemini model
 // ============================================================
 const model = genAI.getGenerativeModel({
-  model: 'gemini-2.5-flash',   // was gemini-2.5-flash — ~2x faster
+  model: 'gemini-2.5-flash-lite',   // was gemini-2.5-flash — ~2x faster
   systemInstruction: SYSTEM_PROMPT,
   generationConfig,
   tools,
