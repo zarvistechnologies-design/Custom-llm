@@ -403,7 +403,7 @@ Tools available:
 
             if (hasDuplicateBooking) {
               console.log('[SKIP DUPLICATE] Booking already done — sending direct confirmation, no tool call');
-              const text = 'जी हाँ, आपका अपॉइंटमेंट पहले से बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
+              const text = 'जी हाँ, आपका अपॉइंटमेंट  बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
               console.log('Sending to Millis (streamed):', text);
               streamTextToMillis(ws, streamId, text);
               shortCircuitTriggered = true;
