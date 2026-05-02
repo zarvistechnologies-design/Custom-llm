@@ -202,7 +202,7 @@ async function executeTool(name, args, callContext) {
 }
 
 // ============================================================
-// STREAMING HELPER — final response, closes stream (end_of_stream: true)
+// STREAMING HELPER
 // ============================================================
 function streamTextToMillis(ws, streamId, text) {
   const sentences = text
@@ -238,23 +238,6 @@ function streamTextToMillis(ws, streamId, text) {
       },
     }));
   });
-}
-
-// ============================================================
-// STREAMING HELPER — partial, keeps stream OPEN for more text to follow
-// Use this BEFORE a tool call so the caller hears something instantly
-// while the HTTP request is in-flight
-// ============================================================
-function streamTextToMillisPartial(ws, streamId, text) {
-  ws.send(JSON.stringify({
-    type: 'stream_response',
-    data: {
-      stream_id: streamId,
-      content: text,
-      flush: true,
-      end_of_stream: false, // ← stream stays open, confirmation will follow
-    },
-  }));
 }
 
 // ============================================================
@@ -398,7 +381,7 @@ Tools available:
           let response = result.response;
 
           // ============================================================
-          // Tool call loop
+          // Tool call loop with smart duplicate booking handling
           // ============================================================
           let safetyCounter = 0;
           let shortCircuitTriggered = false;
@@ -410,48 +393,36 @@ Tools available:
 
             console.log(`[LOOP ${safetyCounter}] Function calls:`, functionCalls);
 
+            // ============================================================
             // ⚡ SHORT-CIRCUIT: Duplicate booking attempt
+            // Tool execute NHI hoga, seedha confirmation bhejo
+            // ============================================================
             const hasDuplicateBooking = functionCalls.some(
               (call) => call.name === 'book_appointment' && bookingCompleted
             );
+
             if (hasDuplicateBooking) {
-              console.log('[SKIP DUPLICATE] Booking already done — sending direct confirmation');
-              streamTextToMillis(ws, streamId, 'जी हाँ, आपका अपॉइंटमेंट बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!');
+              console.log('[SKIP DUPLICATE] Booking already done — sending direct confirmation, no tool call');
+              const text = 'जी हाँ, आपका अपॉइंटमेंट  बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
+              console.log('Sending to Millis (streamed):', text);
+              streamTextToMillis(ws, streamId, text);
               shortCircuitTriggered = true;
               break;
             }
 
+            // ============================================================
             // Normal tool execution
+            // ============================================================
             const functionResponses = [];
             for (const call of functionCalls) {
-
-              // ⚡ PRE-TOOL MESSAGE — stream instantly, BEFORE the HTTP call fires
-              // Caller hears this while the booking request is in-flight (~1-2s)
-              if (call.name === 'book_appointment') {
-                console.log('[BOOKING] Streaming pre-tool waiting message');
-                streamTextToMillisPartial(ws, streamId, 'जी, मैं आपका अपॉइंटमेंट बुक कर रही हूँ, एक moment रुकिए।');
-              }
-
               const toolResult = await executeTool(call.name, call.args, callContext);
 
               if (call.name === 'book_appointment') {
                 if (toolResult.success) {
                   bookingCompleted = true;
                   console.log('[BOOKING] ✅ Marked as completed');
-
-                  // ⚡ INSTANT CONFIRMATION — no Gemini round-trip needed
-                  const { patient_name, doctor_name, appointment_date, appointment_time } = call.args;
-                  const confirmText =
-                    `${patient_name} जी, आपका अपॉइंटमेंट कन्फर्म हो गया। ` +
-                    `${doctor_name} के साथ ${appointment_date} को ${appointment_time} बजे। ` +
-                    `धन्यवाद, आपका दिन शुभ हो!`;
-
-                  console.log('[BOOKING] Streaming instant confirmation:', confirmText);
-                  streamTextToMillis(ws, streamId, confirmText); // closes stream
-                  shortCircuitTriggered = true;
-                  break; // stop processing sibling calls
                 } else {
-                  // Real failure — let Gemini explain naturally
+                  // ⚠️ REAL technical error — let Gemini handle it (will say "तकनीकी समस्या")
                   console.warn('[BOOKING] ❌ Real failure:', toolResult.error);
                 }
               }
@@ -461,16 +432,16 @@ Tools available:
               });
             }
 
-            if (shortCircuitTriggered) break; // stop the while-loop too
-
             result = await chat.sendMessage(functionResponses);
             response = result.response;
           }
 
-          // Already streamed via short-circuit — nothing more to do
-          if (shortCircuitTriggered) return;
+          // If short-circuit already sent response, skip the rest
+          if (shortCircuitTriggered) {
+            return;
+          }
 
-          // Non-booking tool calls — let Gemini compose the response normally
+          // Get final text and stream it
           let text = '';
           try {
             text = response.text();
