@@ -45,7 +45,6 @@ function getISTDateInfo() {
 async function executeTool(name, args, callContext) {
   console.log(`[TOOL CALL] ${name}`, args);
 
-  // Common headers
   const headers = { 'Content-Type': 'application/json' };
   if (callContext.booking_auth_header) {
     headers['Authorization'] = callContext.booking_auth_header;
@@ -57,14 +56,12 @@ async function executeTool(name, args, callContext) {
   if (name === 'book_appointment') {
     try {
       const payload = {
-        // camelCase (endpoint required fields)
         patientName: args.patient_name,
         doctorName: args.doctor_name,
         date: args.appointment_date,
         time: args.appointment_time,
         patientPhone: callContext.from_phone,
         assignedPhoneNumber: callContext.to_phone,
-        // backup snake_case
         patient_name: args.patient_name,
         doctor_name: args.doctor_name,
         appointment_date: args.appointment_date,
@@ -75,7 +72,6 @@ async function executeTool(name, args, callContext) {
         ToPhone: callContext.to_phone,
         from_phone: callContext.from_phone,
         to_phone: callContext.to_phone,
-        // metadata
         session_id: callContext.session_id,
         call_id: callContext.call_id,
         clinic_name: callContext.clinic_name,
@@ -119,15 +115,12 @@ async function executeTool(name, args, callContext) {
       }
 
       const payload = {
-        // camelCase
         doctorName: args.doctor_name,
         date: args.date,
         assignedPhoneNumber: callContext.to_phone,
-        // backup snake_case
         doctor_name: args.doctor_name,
         clinic_phone: callContext.to_phone,
         ToPhone: callContext.to_phone,
-        // metadata
         session_id: callContext.session_id,
         clinic_name: callContext.clinic_name,
       };
@@ -171,13 +164,10 @@ async function executeTool(name, args, callContext) {
       }
 
       const payload = {
-        // camelCase
         speciality: args.speciality || null,
         assignedPhoneNumber: callContext.to_phone,
-        // backup snake_case
         clinic_phone: callContext.to_phone,
         ToPhone: callContext.to_phone,
-        // metadata
         session_id: callContext.session_id,
         clinic_name: callContext.clinic_name,
       };
@@ -212,7 +202,7 @@ async function executeTool(name, args, callContext) {
 }
 
 // ============================================================
-// STREAMING HELPER — sentence-by-sentence with flush:true
+// STREAMING HELPER
 // ============================================================
 function streamTextToMillis(ws, streamId, text) {
   const sentences = text
@@ -272,7 +262,6 @@ function handleConnection(ws, req) {
     voip_provider: null,
     direction: null,
     metadata: {},
-    // Filled when clinic loads:
     clinic_name: null,
     booking_endpoint: null,
     availability_endpoint: null,
@@ -309,7 +298,6 @@ function handleConnection(ws, req) {
 
         console.log('[START_CALL] Captured:', callContext);
 
-        // Load clinic config from DB
         clinicConfig = await getClinicConfig(callContext.to_phone);
         callContext.clinic_name = clinicConfig.name;
         callContext.booking_endpoint = clinicConfig.booking_endpoint;
@@ -320,10 +308,8 @@ function handleConnection(ws, req) {
         console.log(`[START_CALL] Loaded clinic: ${clinicConfig.name}`);
         console.log(`[START_CALL] Endpoints: book=${!!callContext.booking_endpoint}, avail=${!!callContext.availability_endpoint}, doctors=${!!callContext.doctors_endpoint}`);
 
-        // Build Gemini model with this clinic's prompt
         model = buildModel(clinicConfig);
 
-        // Send greeting — flush:true for instant TTS
         ws.send(JSON.stringify({
           type: 'stream_response',
           data: {
@@ -372,12 +358,13 @@ Booking completed this call: ${bookingCompleted}
 
 ⚠️ Reply per system prompt language. Time/date in user's language (e.g. Hindi: "सुबह दस बजे"), never raw English numbers.
 
+⚠️ IMPORTANT: If "Booking completed this call: true" — DO NOT call book_appointment again. Just briefly reconfirm in user's language and end gracefully.
+
 Tools available:
-- book_appointment: book a new appointment (ONLY use after collecting date, time, name)
+- book_appointment: book a new appointment (ONLY use after collecting date, time, name, AND only if no booking yet)
 - check_doctor_availability: check available slots for a doctor on a date
 - get_doctors: get list of all doctors at this clinic`;
 
-        // Build chat history from Millis transcript
         let history = transcript.slice(0, -1).map((m) => ({
           role: m.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: m.content || '' }],
@@ -393,8 +380,12 @@ Tools available:
           let result = await chat.sendMessage(augmentedMessage);
           let response = result.response;
 
-          // Tool call loop
+          // ============================================================
+          // Tool call loop with smart duplicate booking handling
+          // ============================================================
           let safetyCounter = 0;
+          let shortCircuitTriggered = false;
+
           while (safetyCounter < 5) {
             safetyCounter++;
             const functionCalls = response.functionCalls();
@@ -402,22 +393,38 @@ Tools available:
 
             console.log(`[LOOP ${safetyCounter}] Function calls:`, functionCalls);
 
+            // ============================================================
+            // ⚡ SHORT-CIRCUIT: Duplicate booking attempt
+            // Tool execute NHI hoga, seedha confirmation bhejo
+            // ============================================================
+            const hasDuplicateBooking = functionCalls.some(
+              (call) => call.name === 'book_appointment' && bookingCompleted
+            );
+
+            if (hasDuplicateBooking) {
+              console.log('[SKIP DUPLICATE] Booking already done — sending direct confirmation, no tool call');
+              const text = 'जी हाँ, आपका अपॉइंटमेंट पहले से बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
+              console.log('Sending to Millis (streamed):', text);
+              streamTextToMillis(ws, streamId, text);
+              shortCircuitTriggered = true;
+              break;
+            }
+
+            // ============================================================
+            // Normal tool execution
+            // ============================================================
             const functionResponses = [];
             for (const call of functionCalls) {
-              // Prevent duplicate booking
-              if (call.name === 'book_appointment' && bookingCompleted) {
-                functionResponses.push({
-                  functionResponse: {
-                    name: call.name,
-                    response: { success: false, error: 'Already booked this call.' },
-                  },
-                });
-                continue;
-              }
-
               const toolResult = await executeTool(call.name, call.args, callContext);
-              if (call.name === 'book_appointment' && toolResult.success) {
-                bookingCompleted = true;
+
+              if (call.name === 'book_appointment') {
+                if (toolResult.success) {
+                  bookingCompleted = true;
+                  console.log('[BOOKING] ✅ Marked as completed');
+                } else {
+                  // ⚠️ REAL technical error — let Gemini handle it (will say "तकनीकी समस्या")
+                  console.warn('[BOOKING] ❌ Real failure:', toolResult.error);
+                }
               }
 
               functionResponses.push({
@@ -427,6 +434,11 @@ Tools available:
 
             result = await chat.sendMessage(functionResponses);
             response = result.response;
+          }
+
+          // If short-circuit already sent response, skip the rest
+          if (shortCircuitTriggered) {
+            return;
           }
 
           // Get final text and stream it
