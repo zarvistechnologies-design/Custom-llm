@@ -1,12 +1,20 @@
 const express = require('express');
+const mongoose = require('mongoose');
+const { getCacheStats } = require('../services/clinicServices');
+
 const router = express.Router();
 
-// GET /api/health
 router.get('/', (req, res) => {
+  const dbStates = ['disconnected', 'connected', 'connecting', 'disconnecting'];
   res.json({
-    status: 'OK',
-    message: 'Custom LLM Backend is healthy',
-    timestamp: new Date().toISOString()
+    status: 'ok',
+    server_time: new Date().toISOString(),
+    database: {
+      state: dbStates[mongoose.connection.readyState] || 'unknown',
+      name: mongoose.connection.name || null,
+    },
+    cache: getCacheStats(),
+    uptime_seconds: process.uptime(),
   });
 });
 
