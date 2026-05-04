@@ -40,6 +40,64 @@ function getISTDateInfo() {
 }
 
 // ============================================================
+// ⚡ LANGUAGE DETECTION — last user message se language detect karo
+// ============================================================
+function detectLanguage(text) {
+  if (!text) return 'hi';
+
+  // Devanagari script characters
+  const devanagariChars = (text.match(/[\u0900-\u097F]/g) || []).length;
+  const latinChars = (text.match(/[a-zA-Z]/g) || []).length;
+  const totalChars = devanagariChars + latinChars;
+
+  if (totalChars === 0) return 'hi';
+
+  const devanagariRatio = devanagariChars / totalChars;
+
+  // Marathi-specific words/patterns
+  const marathiKeywords = /आहे|पाहिजे|कधी|काय|कोण|वाजता|बरोबर|उद्या|परवा|नक्की|माफ करा|सांगाल|आपले|कृपया/;
+  const isMarathi = marathiKeywords.test(text);
+
+  if (devanagariRatio > 0.5) {
+    return isMarathi ? 'mr' : 'hi';
+  }
+
+  // Mostly Latin → English
+  if (devanagariRatio < 0.2) {
+    return 'en';
+  }
+
+  // Mixed (Hinglish/Marglish) — default to Hindi
+  return 'hi';
+}
+
+// ============================================================
+// ⚡ FILLER MESSAGES per language (random pick for variety)
+// ============================================================
+const FILLERS = {
+  hi: [
+    'एक पल, आपका अपॉइंटमेंट बुक कर रही हूं...',
+    'बस एक मिनट, आपका नंबर लगा रही हूं...',
+    'ठीक है, बुक कर रही हूं आपका नंबर...',
+  ],
+  mr: [
+    'एक मिनिट, तुमचा नंबर लावत आहे...',
+    'थांबा, बुक करत आहे...',
+    'ठीक आहे, अपॉइंटमेंट लावत आहे...',
+  ],
+  en: [
+    'One moment, booking your appointment...',
+    'Just a second, getting your slot booked...',
+    'Sure, processing your booking now...',
+  ],
+};
+
+function getFillerForLanguage(lang) {
+  const list = FILLERS[lang] || FILLERS.hi;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+// ============================================================
 // TOOL EXECUTOR — handles all 3 tools
 // ============================================================
 async function executeTool(name, args, callContext) {
@@ -50,9 +108,6 @@ async function executeTool(name, args, callContext) {
     headers['Authorization'] = callContext.booking_auth_header;
   }
 
-  // ============================================================
-  // TOOL 1: BOOK APPOINTMENT
-  // ============================================================
   if (name === 'book_appointment') {
     try {
       const payload = {
@@ -102,18 +157,11 @@ async function executeTool(name, args, callContext) {
     }
   }
 
-  // ============================================================
-  // TOOL 2: CHECK DOCTOR AVAILABILITY
-  // ============================================================
   if (name === 'check_doctor_availability') {
     try {
       if (!callContext.availability_endpoint) {
-        return {
-          success: false,
-          error: 'Availability endpoint not configured for this clinic.',
-        };
+        return { success: false, error: 'Availability endpoint not configured.' };
       }
-
       const payload = {
         doctorName: args.doctor_name,
         date: args.date,
@@ -124,45 +172,30 @@ async function executeTool(name, args, callContext) {
         session_id: callContext.session_id,
         clinic_name: callContext.clinic_name,
       };
-
       console.log('[CHECK_AVAILABILITY] Endpoint:', callContext.availability_endpoint);
       console.log('[CHECK_AVAILABILITY] Payload:', JSON.stringify(payload, null, 2));
-
       const response = await axios.post(callContext.availability_endpoint, payload, {
         headers,
         timeout: 8000,
       });
-
       console.log('[CHECK_AVAILABILITY] ✅ Response:', response.data);
       return { success: true, availability: response.data };
     } catch (err) {
       console.error('[CHECK_AVAILABILITY] ❌ Error:', err.message);
-      if (err.response) {
-        console.error('[CHECK_AVAILABILITY] Status:', err.response.status);
-        console.error('[CHECK_AVAILABILITY] Endpoint said:', JSON.stringify(err.response.data, null, 2));
-      }
       return {
         success: false,
         error: err.message,
         endpoint_response: err.response?.data,
-        instruction:
-          'Could not fetch availability. Tell caller about technical issue or fallback to general hours.',
+        instruction: 'Could not fetch availability.',
       };
     }
   }
 
-  // ============================================================
-  // TOOL 3: GET DOCTORS LIST
-  // ============================================================
   if (name === 'get_doctors') {
     try {
       if (!callContext.doctors_endpoint) {
-        return {
-          success: false,
-          error: 'Doctors endpoint not configured for this clinic.',
-        };
+        return { success: false, error: 'Doctors endpoint not configured.' };
       }
-
       const payload = {
         speciality: args.speciality || null,
         assignedPhoneNumber: callContext.to_phone,
@@ -171,29 +204,21 @@ async function executeTool(name, args, callContext) {
         session_id: callContext.session_id,
         clinic_name: callContext.clinic_name,
       };
-
       console.log('[GET_DOCTORS] Endpoint:', callContext.doctors_endpoint);
       console.log('[GET_DOCTORS] Payload:', JSON.stringify(payload, null, 2));
-
       const response = await axios.post(callContext.doctors_endpoint, payload, {
         headers,
         timeout: 8000,
       });
-
       console.log('[GET_DOCTORS] ✅ Response:', response.data);
       return { success: true, doctors: response.data };
     } catch (err) {
       console.error('[GET_DOCTORS] ❌ Error:', err.message);
-      if (err.response) {
-        console.error('[GET_DOCTORS] Status:', err.response.status);
-        console.error('[GET_DOCTORS] Endpoint said:', JSON.stringify(err.response.data, null, 2));
-      }
       return {
         success: false,
         error: err.message,
         endpoint_response: err.response?.data,
-        instruction:
-          'Could not fetch doctors list. Tell caller about technical issue or use info from system prompt.',
+        instruction: 'Could not fetch doctors list.',
       };
     }
   }
@@ -202,7 +227,7 @@ async function executeTool(name, args, callContext) {
 }
 
 // ============================================================
-// STREAMING HELPER
+// STREAMING HELPER (final stream — closes audio)
 // ============================================================
 function streamTextToMillis(ws, streamId, text) {
   const sentences = text
@@ -238,6 +263,22 @@ function streamTextToMillis(ws, streamId, text) {
       },
     }));
   });
+}
+
+// ============================================================
+// ⚡ FILLER STREAM — keeps stream OPEN (more audio coming)
+// ============================================================
+function streamFillerToMillis(ws, streamId, text) {
+  console.log('[FILLER] Sending:', text);
+  ws.send(JSON.stringify({
+    type: 'stream_response',
+    data: {
+      stream_id: streamId,
+      content: text + ' ',
+      flush: true,
+      end_of_stream: false,  // ⚡ stream OPEN — more audio appending
+    },
+  }));
 }
 
 // ============================================================
@@ -279,7 +320,7 @@ function handleConnection(ws, req) {
       console.log('Received:', message.type);
 
       // ----------------------------------------------------------
-      // START_CALL — capture phone, LOAD CLINIC FROM DB
+      // START_CALL
       // ----------------------------------------------------------
       if (message.type === 'start_call') {
         const d = message.data || {};
@@ -306,7 +347,6 @@ function handleConnection(ws, req) {
         callContext.booking_auth_header = clinicConfig.booking_auth_header;
 
         console.log(`[START_CALL] Loaded clinic: ${clinicConfig.name}`);
-        console.log(`[START_CALL] Endpoints: book=${!!callContext.booking_endpoint}, avail=${!!callContext.availability_endpoint}, doctors=${!!callContext.doctors_endpoint}`);
 
         model = buildModel(clinicConfig);
 
@@ -342,6 +382,10 @@ function handleConnection(ws, req) {
 
         console.log('User said:', userMessage);
 
+        // ⚡ Detect language from user message
+        const userLang = detectLanguage(userMessage);
+        console.log(`[LANG] Detected: ${userLang}`);
+
         const ist = getISTDateInfo();
         const dateTimeContext = `[SYSTEM CONTEXT - DO NOT SPEAK ALOUD]
 Today's date: ${ist.isoDate}
@@ -358,10 +402,12 @@ Booking completed this call: ${bookingCompleted}
 
 ⚠️ Reply per system prompt language. Time/date in user's language (e.g. Hindi: "सुबह दस बजे"), never raw English numbers.
 
-⚠️ IMPORTANT: If "Booking completed this call: true" — DO NOT call book_appointment again. Just briefly reconfirm in user's language and end gracefully.
+⚠️ IMPORTANT: If "Booking completed this call: true" — DO NOT call book_appointment again. Just briefly reconfirm and end gracefully.
+
+⚠️ When generating confirmation after booking, DO NOT include filler phrases like "बुक कर रही हूं" — system already speaks a filler before booking. Go directly to final confirmation.
 
 Tools available:
-- book_appointment: book a new appointment (ONLY use after collecting date, time, name, AND only if no booking yet)
+- book_appointment: book a new appointment (ONLY use after collecting date, time, name)
 - check_doctor_availability: check available slots for a doctor on a date
 - get_doctors: get list of all doctors at this clinic`;
 
@@ -381,10 +427,11 @@ Tools available:
           let response = result.response;
 
           // ============================================================
-          // Tool call loop with smart duplicate booking handling
+          // Tool call loop with FORCED filler + duplicate handling
           // ============================================================
           let safetyCounter = 0;
           let shortCircuitTriggered = false;
+          let fillerSent = false;
 
           while (safetyCounter < 5) {
             safetyCounter++;
@@ -395,19 +442,31 @@ Tools available:
 
             // ============================================================
             // ⚡ SHORT-CIRCUIT: Duplicate booking attempt
-            // Tool execute NHI hoga, seedha confirmation bhejo
             // ============================================================
             const hasDuplicateBooking = functionCalls.some(
               (call) => call.name === 'book_appointment' && bookingCompleted
             );
 
             if (hasDuplicateBooking) {
-              console.log('[SKIP DUPLICATE] Booking already done — sending direct confirmation, no tool call');
-              const text = 'जी हाँ, आपका अपॉइंटमेंट  बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
-              console.log('Sending to Millis (streamed):', text);
+              console.log('[SKIP DUPLICATE] Booking already done — direct confirmation');
+              const text = 'जी हाँ, आपका अपॉइंटमेंट बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
               streamTextToMillis(ws, streamId, text);
               shortCircuitTriggered = true;
               break;
+            }
+
+            // ============================================================
+            // ⚡ FORCED FILLER — Tool call hone se PEHLE bolo
+            // Language: user ke message se auto-detect
+            // ============================================================
+            const hasNewBooking = functionCalls.some(
+              (call) => call.name === 'book_appointment' && !bookingCompleted
+            );
+
+            if (hasNewBooking && !fillerSent) {
+              const filler = getFillerForLanguage(userLang);
+              streamFillerToMillis(ws, streamId, filler);
+              fillerSent = true;
             }
 
             // ============================================================
@@ -422,7 +481,6 @@ Tools available:
                   bookingCompleted = true;
                   console.log('[BOOKING] ✅ Marked as completed');
                 } else {
-                  // ⚠️ REAL technical error — let Gemini handle it (will say "तकनीकी समस्या")
                   console.warn('[BOOKING] ❌ Real failure:', toolResult.error);
                 }
               }
@@ -436,12 +494,10 @@ Tools available:
             response = result.response;
           }
 
-          // If short-circuit already sent response, skip the rest
           if (shortCircuitTriggered) {
             return;
           }
 
-          // Get final text and stream it
           let text = '';
           try {
             text = response.text();
