@@ -39,6 +39,7 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/health', require('./routes/health'));
+app.use('/api/admin', require('./routes/admin'));
 
 // ============================================================
 // MONGODB CONNECTION

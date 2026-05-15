@@ -25,7 +25,7 @@ const clinicSchema = new mongoose.Schema(
     greeting: { type: String, required: true },
 
     // ========== TOOL ENDPOINTS ==========
-    booking_endpoint: { type: String, required: true },
+    booking_endpoint: { type: String, default: '' },
     availability_endpoint: { type: String, default: null },
     doctors_endpoint: { type: String, default: null },
 
