@@ -36,8 +36,20 @@ async function getClinicConfig(phoneNumber) {
     return DEFAULT_CONFIG;
   }
 
+  const rawPhone = String(phoneNumber).trim();
+  const digits = rawPhone.replace(/\D/g, '');
+  const last10 = digits.slice(-10);
+  const phoneVariants = [...new Set([
+    rawPhone,
+    digits,
+    digits ? `+${digits}` : null,
+    last10,
+    last10 ? `+91${last10}` : null,
+  ].filter(Boolean))];
+  const cacheKey = phoneVariants[0];
+
   // 1. Cache check
-  const cached = cache.get(phoneNumber);
+  const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.cachedAt < CACHE_TTL) {
     console.log(`[ClinicService] ✅ Cache HIT: ${phoneNumber}`);
     return cached.config;
@@ -46,7 +58,13 @@ async function getClinicConfig(phoneNumber) {
   // 2. DB query
   try {
     console.log(`[ClinicService] Cache MISS — DB query: ${phoneNumber}`);
-    const clinic = await Clinic.findOne({ phone_number: phoneNumber, active: true }).lean();
+    const clinic = await Clinic.findOne({
+      active: true,
+      $or: [
+        { phone_number: { $in: phoneVariants } },
+        ...(last10 ? [{ phone_number: new RegExp(`${last10}$`) }] : []),
+      ],
+    }).lean();
 
     if (!clinic) {
       console.warn(`[ClinicService] ⚠️ No clinic for ${phoneNumber}, using default`);
@@ -54,7 +72,7 @@ async function getClinicConfig(phoneNumber) {
     }
 
     console.log(`[ClinicService] ✅ Loaded: ${clinic.name}`);
-    cache.set(phoneNumber, { config: clinic, cachedAt: Date.now() });
+    cache.set(cacheKey, { config: clinic, cachedAt: Date.now() });
     return clinic;
   } catch (err) {
     console.error('[ClinicService] ❌ DB error, using default:', err.message);

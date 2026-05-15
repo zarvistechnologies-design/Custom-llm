@@ -1,4 +1,5 @@
 const axios = require('axios');
+const mongoose = require('mongoose');
 const { getClinicConfig } = require('../services/clinicServices');
 const { buildModel } = require('../services/geminiSevice');
 
@@ -95,6 +96,109 @@ const FILLERS = {
 function getFillerForLanguage(lang) {
   const list = FILLERS[lang] || FILLERS.hi;
   return list[Math.floor(Math.random() * list.length)];
+}
+
+function getMongoCollection(name) {
+  if (!mongoose.connection?.db) return null;
+  return mongoose.connection.db.collection(name);
+}
+
+function buildSupportPayload(toolName, args, callContext) {
+  return {
+    ...(args || {}),
+    tool: toolName,
+    tenant_id: callContext.tenant_id || 'akiara',
+    customer_phone: args?.customer_phone || callContext.from_phone,
+    agent_phone: callContext.to_phone,
+    session_id: callContext.session_id,
+    call_id: callContext.call_id,
+    call_direction: callContext.direction,
+    metadata: callContext.metadata || {},
+    created_at: new Date(),
+  };
+}
+
+async function postSupportTool(endpoint, payload, callContext) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (callContext.support_auth_header || callContext.booking_auth_header) {
+    headers.Authorization = callContext.support_auth_header || callContext.booking_auth_header;
+  }
+
+  const response = await axios.post(endpoint, payload, { headers, timeout: 10000 });
+  return { success: true, data: response.data };
+}
+
+async function storeSupportFallback(toolName, payload) {
+  const collectionByTool = {
+    create_support_ticket: 'akiara_voice_tickets',
+    update_support_ticket: 'akiara_voice_ticket_updates',
+    transfer_to_service_agent: 'akiara_voice_transfers',
+    send_post_call_message: 'akiara_post_call_messages',
+    check_demo_slots: 'akiara_demo_slot_checks',
+    book_live_demo: 'akiara_live_demo_bookings',
+  };
+
+  if (toolName === 'lookup_order') {
+    const orders = getMongoCollection('akiara_orders');
+    if (!orders || !payload.order_id) {
+      return { success: false, found: false, error: 'Order lookup endpoint not configured.' };
+    }
+    const order = await orders.findOne({ order_id: payload.order_id });
+    return { success: true, found: Boolean(order), order };
+  }
+
+  const collectionName = collectionByTool[toolName];
+  const collection = collectionName ? getMongoCollection(collectionName) : null;
+  if (!collection) {
+    return { success: false, error: `${toolName} endpoint not configured.` };
+  }
+
+  const doc = {
+    ...payload,
+    status:
+      toolName === 'send_post_call_message'
+        ? 'queued'
+        : toolName === 'create_support_ticket' && payload.escalated
+          ? 'escalated'
+          : 'open',
+    updated_at: new Date(),
+  };
+
+  const result = await collection.insertOne(doc);
+  return { success: true, id: String(result.insertedId), data: doc };
+}
+
+async function executeSupportTool(name, args, callContext) {
+  const endpointByTool = {
+    lookup_order: callContext.order_lookup_endpoint,
+    create_support_ticket: callContext.support_ticket_endpoint,
+    update_support_ticket: callContext.support_ticket_update_endpoint,
+    transfer_to_service_agent: callContext.transfer_endpoint,
+    send_post_call_message: callContext.post_call_message_endpoint,
+    check_demo_slots: callContext.demo_slots_endpoint,
+    book_live_demo: callContext.demo_booking_endpoint,
+  };
+
+  const payload = buildSupportPayload(name, args, callContext);
+  const endpoint = endpointByTool[name];
+
+  try {
+    if (endpoint) {
+      console.log(`[SUPPORT TOOL] ${name} -> ${endpoint}`);
+      return await postSupportTool(endpoint, payload, callContext);
+    }
+
+    console.log(`[SUPPORT TOOL] ${name} -> Mongo fallback`);
+    return await storeSupportFallback(name, payload);
+  } catch (err) {
+    console.error(`[SUPPORT TOOL] ${name} error:`, err.message);
+    return {
+      success: false,
+      error: err.message,
+      endpoint_response: err.response?.data,
+      instruction: 'Do not mention this internal error. Continue gracefully or transfer if needed.',
+    };
+  }
 }
 
 // ============================================================
@@ -223,6 +327,20 @@ async function executeTool(name, args, callContext) {
     }
   }
 
+  if (
+    [
+      'lookup_order',
+      'create_support_ticket',
+      'update_support_ticket',
+      'transfer_to_service_agent',
+      'send_post_call_message',
+      'check_demo_slots',
+      'book_live_demo',
+    ].includes(name)
+  ) {
+    return executeSupportTool(name, args, callContext);
+  }
+
   return { success: false, error: `Unknown tool: ${name}` };
 }
 
@@ -308,6 +426,15 @@ function handleConnection(ws, req) {
     availability_endpoint: null,
     doctors_endpoint: null,
     booking_auth_header: null,
+    tenant_id: null,
+    order_lookup_endpoint: null,
+    support_ticket_endpoint: null,
+    support_ticket_update_endpoint: null,
+    transfer_endpoint: null,
+    post_call_message_endpoint: null,
+    demo_slots_endpoint: null,
+    demo_booking_endpoint: null,
+    support_auth_header: null,
   };
 
   let clinicConfig = null;
@@ -345,6 +472,15 @@ function handleConnection(ws, req) {
         callContext.availability_endpoint = clinicConfig.availability_endpoint;
         callContext.doctors_endpoint = clinicConfig.doctors_endpoint;
         callContext.booking_auth_header = clinicConfig.booking_auth_header;
+        callContext.tenant_id = clinicConfig.tenant_id || clinicConfig.tenantId || null;
+        callContext.order_lookup_endpoint = clinicConfig.order_lookup_endpoint;
+        callContext.support_ticket_endpoint = clinicConfig.support_ticket_endpoint;
+        callContext.support_ticket_update_endpoint = clinicConfig.support_ticket_update_endpoint;
+        callContext.transfer_endpoint = clinicConfig.transfer_endpoint;
+        callContext.post_call_message_endpoint = clinicConfig.post_call_message_endpoint;
+        callContext.demo_slots_endpoint = clinicConfig.demo_slots_endpoint;
+        callContext.demo_booking_endpoint = clinicConfig.demo_booking_endpoint;
+        callContext.support_auth_header = clinicConfig.support_auth_header;
 
         console.log(`[START_CALL] Loaded clinic: ${clinicConfig.name}`);
 
@@ -409,7 +545,14 @@ Booking completed this call: ${bookingCompleted}
 Tools available:
 - book_appointment: book a new appointment (ONLY use after collecting date, time, name)
 - check_doctor_availability: check available slots for a doctor on a date
-- get_doctors: get list of all doctors at this clinic`;
+- get_doctors: get list of all doctors at this clinic
+- lookup_order: look up an Akiara order by order ID
+- create_support_ticket: create final support ticket at end of support call
+- update_support_ticket: update an existing support ticket
+- transfer_to_service_agent: request human support handoff
+- send_post_call_message: queue WhatsApp/SMS after the call
+- check_demo_slots: check live demo slot options
+- book_live_demo: book a live demo after collecting name, email, date, and time`;
 
         let history = transcript.slice(0, -1).map((m) => ({
           role: m.role === 'assistant' ? 'model' : 'user',

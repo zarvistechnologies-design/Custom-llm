@@ -86,6 +86,151 @@ const tools = [
           required: [],
         },
       },
+
+      // ============================================================
+      // SUPPORT TOOLS (Akiara / Devika)
+      // ============================================================
+      {
+        name: 'lookup_order',
+        description:
+          'Look up an Akiara customer order when the caller provides an order ID. Use before warranty or purchase-specific answers when possible.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            order_id: {
+              type: SchemaType.STRING,
+              description: 'Order ID shared by the caller, for example AK-20984.',
+            },
+            customer_phone: {
+              type: SchemaType.STRING,
+              description: 'Caller phone number if available.',
+            },
+          },
+          required: ['order_id'],
+        },
+      },
+      {
+        name: 'create_support_ticket',
+        description:
+          'Create the final support ticket. Call once near the end of every support call, whether resolved or escalated. All values must be in English.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            customer_phone: { type: SchemaType.STRING },
+            customer_name: { type: SchemaType.STRING },
+            order_id: { type: SchemaType.STRING },
+            product: { type: SchemaType.STRING, description: 'Mini, Duo, Yume, or unknown.' },
+            issue_category: {
+              type: SchemaType.STRING,
+              description:
+                'troubleshooting, service_request, refund, warranty, live_demo, general_query, safety, or other.',
+            },
+            issue_description: { type: SchemaType.STRING },
+            issue_summary: {
+              type: SchemaType.STRING,
+              description: 'Concise English summary of what happened and the outcome.',
+            },
+            language: { type: SchemaType.STRING, description: 'en or hi.' },
+            escalated: {
+              type: SchemaType.BOOLEAN,
+              description:
+                'True for human transfer, safety issue, unresolved issue, legal/manager request, or refund outside policy.',
+            },
+            priority: { type: SchemaType.STRING, description: 'normal, high, or urgent.' },
+            resolution: { type: SchemaType.STRING },
+            escalation_reason: { type: SchemaType.STRING },
+            post_call_message_needed: { type: SchemaType.BOOLEAN },
+          },
+          required: ['customer_phone', 'issue_description', 'issue_summary', 'language', 'escalated', 'priority'],
+        },
+      },
+      {
+        name: 'update_support_ticket',
+        description: 'Update an existing support ticket if new information appears after a ticket has already been created.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            ticket_id: { type: SchemaType.STRING },
+            status: { type: SchemaType.STRING },
+            priority: { type: SchemaType.STRING },
+            issue_summary: { type: SchemaType.STRING },
+            resolution: { type: SchemaType.STRING },
+            escalation_reason: { type: SchemaType.STRING },
+          },
+          required: ['ticket_id'],
+        },
+      },
+      {
+        name: 'transfer_to_service_agent',
+        description:
+          'Request handoff to a human service agent for home service, warranty registration, return/refund, safety, manager request, legal, or unresolved issue.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            customer_phone: { type: SchemaType.STRING },
+            order_id: { type: SchemaType.STRING },
+            product: { type: SchemaType.STRING },
+            language: { type: SchemaType.STRING },
+            reason: { type: SchemaType.STRING },
+            priority: { type: SchemaType.STRING },
+            handoff_summary: {
+              type: SchemaType.STRING,
+              description: 'Short English context for the human agent.',
+            },
+          },
+          required: ['customer_phone', 'reason', 'priority', 'handoff_summary'],
+        },
+      },
+      {
+        name: 'send_post_call_message',
+        description:
+          'Queue a WhatsApp or SMS message after the call, such as a troubleshooting video, Calendly link, or follow-up note. Never read URLs aloud during the call.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            customer_phone: { type: SchemaType.STRING },
+            channel: { type: SchemaType.STRING, description: 'whatsapp or sms.' },
+            message: { type: SchemaType.STRING },
+            purpose: {
+              type: SchemaType.STRING,
+              description: 'video_link, calendly_link, policy_info, follow_up, or other.',
+            },
+            link_url: { type: SchemaType.STRING },
+            video_url: { type: SchemaType.STRING },
+          },
+          required: ['customer_phone', 'channel', 'message', 'purpose'],
+        },
+      },
+      {
+        name: 'check_demo_slots',
+        description: 'Check available live-demo slots before booking if slot lookup is configured.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            preferred_date: { type: SchemaType.STRING, description: 'Preferred date in YYYY-MM-DD format.' },
+            preferred_time: { type: SchemaType.STRING },
+            customer_phone: { type: SchemaType.STRING },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'book_live_demo',
+        description:
+          'Book a free Akiara live demo after collecting name, email, and preferred date/time one at a time.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            customer_name: { type: SchemaType.STRING },
+            customer_email: { type: SchemaType.STRING },
+            customer_phone: { type: SchemaType.STRING },
+            preferred_date: { type: SchemaType.STRING, description: 'Preferred date in YYYY-MM-DD format.' },
+            preferred_time: { type: SchemaType.STRING },
+            product: { type: SchemaType.STRING },
+          },
+          required: ['customer_name', 'customer_email', 'preferred_date', 'preferred_time'],
+        },
+      },
     ],
   },
 ];

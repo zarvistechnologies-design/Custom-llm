@@ -15,6 +15,8 @@ const clinicSchema = new mongoose.Schema(
       index: true,
     },
     name: { type: String, required: true },
+    tenant_id: { type: String, default: null, index: true },
+    bot_name: { type: String, default: null },
 
     // Full system prompt as plain string
     prompt: { type: String, required: true },
@@ -27,8 +29,18 @@ const clinicSchema = new mongoose.Schema(
     availability_endpoint: { type: String, default: null },
     doctors_endpoint: { type: String, default: null },
 
+    // Optional support tools for non-medical agents such as Akiara/Devika.
+    order_lookup_endpoint: { type: String, default: null },
+    support_ticket_endpoint: { type: String, default: null },
+    support_ticket_update_endpoint: { type: String, default: null },
+    transfer_endpoint: { type: String, default: null },
+    post_call_message_endpoint: { type: String, default: null },
+    demo_slots_endpoint: { type: String, default: null },
+    demo_booking_endpoint: { type: String, default: null },
+
     // Optional auth header for all endpoints
     booking_auth_header: { type: String, default: null },
+    support_auth_header: { type: String, default: null },
 
     // Gemini config
     model: { type: String, default: 'gemini-2.5-flash' },
