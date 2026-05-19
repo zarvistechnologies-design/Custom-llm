@@ -22,24 +22,12 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/', (req, res) => {
   res.json({
     message: 'Multi-Clinic Voice Agent Backend',
-    tools: [
-      'book_appointment',
-      'check_doctor_availability',
-      'get_doctors',
-      'lookup_order',
-      'create_support_ticket',
-      'transfer_to_service_agent',
-      'send_post_call_message',
-      'check_demo_slots',
-      'book_live_demo',
-    ],
-    modules: { custom_llm_ws: 'ws://localhost:3000/' },
+    tools: ['book_appointment', 'check_doctor_availability', 'get_doctors'],
     optimizations: ['MongoDB-based prompts', 'streaming with flush', 'in-memory cache'],
   });
 });
 
 app.use('/api/health', require('./routes/health'));
-app.use('/api/admin', require('./routes/admin'));
 
 // ============================================================
 // MONGODB CONNECTION
