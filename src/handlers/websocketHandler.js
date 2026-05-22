@@ -32,7 +32,7 @@ function getISTDateInfo() {
   return {
     isoDate: `${get('year')}-${get('month')}-${get('day')}`,
     weekday: get('weekday'),
-    time12: `${get('hour')}:${get('minute')} ${get('dayPeriod') || 'PM'}`,
+    time12: `${get('hour')}:${get('minute')} ${(get('dayPeriod') || '').toUpperCase() || (parseInt(get('hour')) < 12 ? 'AM' : 'PM')}`,
     fullText: `${get('weekday')}, ${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')} ${get('dayPeriod') || 'PM'}`,
     tomorrow: { date: `${tGet('year')}-${tGet('month')}-${tGet('day')}`, weekday: tGet('weekday') },
     dayAfter: { date: `${daGet('year')}-${daGet('month')}-${daGet('day')}`, weekday: daGet('weekday') },
@@ -387,9 +387,10 @@ function handleConnection(ws, req) {
         console.log(`[LANG] Detected: ${userLang}`);
 
         const ist = getISTDateInfo();
-        const dateTimeContext = `[SYSTEM CONTEXT - DO NOT SPEAK ALOUD]
+     const dateTimeContext = `[SYSTEM CONTEXT - DO NOT SPEAK ALOUD]
 Today's date: ${ist.isoDate}
 Today's weekday: ${ist.weekday}
+Current time (IST): ${ist.time12}
 Tomorrow's date: ${ist.tomorrow.date}
 Tomorrow's weekday: ${ist.tomorrow.weekday}
 Day after tomorrow's date: ${ist.dayAfter.date}
