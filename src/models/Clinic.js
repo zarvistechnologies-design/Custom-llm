@@ -18,7 +18,7 @@ const clinicSchema = new mongoose.Schema(
 
     // Full system prompt as plain string
     prompt: { type: String, required: true },
-
+    transfer_to:{type:String},
     // First message agent speaks when call connects
     greeting: { type: String, required: true },
 
