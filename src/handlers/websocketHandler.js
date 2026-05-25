@@ -40,11 +40,12 @@ function getISTDateInfo() {
 }
 
 // ============================================================
-// LANGUAGE DETECTION — last user message se language detect karo
+// ⚡ LANGUAGE DETECTION — last user message se language detect karo
 // ============================================================
 function detectLanguage(text) {
   if (!text) return 'hi';
 
+  // Devanagari script characters
   const devanagariChars = (text.match(/[\u0900-\u097F]/g) || []).length;
   const latinChars = (text.match(/[a-zA-Z]/g) || []).length;
   const totalChars = devanagariChars + latinChars;
@@ -53,6 +54,7 @@ function detectLanguage(text) {
 
   const devanagariRatio = devanagariChars / totalChars;
 
+  // Marathi-specific words/patterns
   const marathiKeywords = /आहे|पाहिजे|कधी|काय|कोण|वाजता|बरोबर|उद्या|परवा|नक्की|माफ करा|सांगाल|आपले|कृपया/;
   const isMarathi = marathiKeywords.test(text);
 
@@ -60,40 +62,23 @@ function detectLanguage(text) {
     return isMarathi ? 'mr' : 'hi';
   }
 
+  // Mostly Latin → English
   if (devanagariRatio < 0.2) {
     return 'en';
   }
 
+  // Mixed (Hinglish/Marglish) — default to Hindi
   return 'hi';
 }
 
 // ============================================================
-// TRANSFER INTENT DETECTION
-// ============================================================
-function detectTransferIntent(text) {
-  if (!text) return false;
-
-  const patterns = [
-    // Hindi
-    /डॉक्टर से बात|डॉक्टर को बुलाओ|डॉक्टर से कनेक्ट|इंसान से बात|असली इंसान|रिसेप्शन|रिसेप्शनिस्ट|किसी से बात|स्टाफ से बात|ट्रांसफर करो|ट्रान्सफर|आगे भेजो/i,
-    // Marathi
-    /डॉक्टरांशी बोलायचे|डॉक्टरांना द्या|माणसाशी बोलायचे|रिसेप्शनिस्ट|कर्मचाऱ्याशी|ट्रान्सफर करा|पुढे द्या/i,
-    // English / Hinglish
-    /speak to (a |the )?(human|doctor|person|agent|receptionist|staff|someone)|talk to (a |the )?(human|doctor|real person|agent|receptionist|someone)|connect me to|transfer (me|call)|real person|actual person|human agent|doctor please|get me (a |the )?(doctor|agent|human)/i,
-    // Hinglish mixed
-    /doctor se baat|doctor ko bulao|kisi se baat|human chahiye|real person chahiye|transfer kar|agent se baat/i,
-  ];
-
-  return patterns.some((p) => p.test(text));
-}
-
-// ============================================================
-// FILLER MESSAGES per language (random pick for variety)
+// ⚡ FILLER MESSAGES per language (random pick for variety)
 // ============================================================
 const FILLERS = {
   hi: [
     'एक पल, आपका अपॉइंटमेंट बुक कर रही हूं...',
     'बस एक मिनट, आपका नंबर लगा रही हूं...',
+   
   ],
   mr: [
     'एक मिनिट, तुमचा नंबर लावत आहे...',
@@ -107,32 +92,8 @@ const FILLERS = {
   ],
 };
 
-// Transfer-specific fillers per language
-const TRANSFER_FILLERS = {
-  hi: [
-    'एक पल, आपको डॉक्टर से कनेक्ट कर रही हूं...',
-    'ज़रा रुकिए, आपकी कॉल ट्रांसफर कर रही हूं...',
-    'एक मिनट, आपको स्टाफ से जोड़ रही हूं...',
-  ],
-  mr: [
-    'एक मिनिट, तुम्हाला डॉक्टरांशी जोडत आहे...',
-    'थांबा, तुमची कॉल ट्रान्सफर करत आहे...',
-    'एक क्षण, स्टाफशी कनेक्ट करत आहे...',
-  ],
-  en: [
-    'One moment, connecting you to the doctor...',
-    'Please hold, transferring your call now...',
-    'Just a second, connecting you to our staff...',
-  ],
-};
-
 function getFillerForLanguage(lang) {
   const list = FILLERS[lang] || FILLERS.hi;
-  return list[Math.floor(Math.random() * list.length)];
-}
-
-function getTransferFillerForLanguage(lang) {
-  const list = TRANSFER_FILLERS[lang] || TRANSFER_FILLERS.hi;
   return list[Math.floor(Math.random() * list.length)];
 }
 
@@ -305,7 +266,7 @@ function streamTextToMillis(ws, streamId, text) {
 }
 
 // ============================================================
-// FILLER STREAM — keeps stream OPEN (more audio coming)
+// ⚡ FILLER STREAM — keeps stream OPEN (more audio coming)
 // ============================================================
 function streamFillerToMillis(ws, streamId, text) {
   console.log('[FILLER] Sending:', text);
@@ -315,7 +276,7 @@ function streamFillerToMillis(ws, streamId, text) {
       stream_id: streamId,
       content: text + ' ',
       flush: true,
-      end_of_stream: false, // stream OPEN — more audio appending
+      end_of_stream: false,  // ⚡ stream OPEN — more audio appending
     },
   }));
 }
@@ -347,7 +308,6 @@ function handleConnection(ws, req) {
     availability_endpoint: null,
     doctors_endpoint: null,
     booking_auth_header: null,
-    transfer_to: null, // ⚡ transfer destination number
   };
 
   let clinicConfig = null;
@@ -385,10 +345,8 @@ function handleConnection(ws, req) {
         callContext.availability_endpoint = clinicConfig.availability_endpoint;
         callContext.doctors_endpoint = clinicConfig.doctors_endpoint;
         callContext.booking_auth_header = clinicConfig.booking_auth_header;
-        callContext.transfer_to = clinicConfig.transfer_to || null; // ⚡ load transfer number
 
         console.log(`[START_CALL] Loaded clinic: ${clinicConfig.name}`);
-        console.log(`[START_CALL] Transfer number: ${callContext.transfer_to || 'not configured'}`);
 
         model = buildModel(clinicConfig);
 
@@ -424,54 +382,12 @@ function handleConnection(ws, req) {
 
         console.log('User said:', userMessage);
 
-        // Detect language from user message
+        // ⚡ Detect language from user message
         const userLang = detectLanguage(userMessage);
         console.log(`[LANG] Detected: ${userLang}`);
 
-        // ============================================================
-        // ⚡ TRANSFER INTENT — check BEFORE hitting LLM
-        // ============================================================
-        if (detectTransferIntent(userMessage)) {
-          console.log('[TRANSFER] Intent detected in:', userMessage);
-
-          if (!callContext.transfer_to) {
-            // No transfer number configured for this clinic
-            console.warn('[TRANSFER] No transfer_to number configured');
-            const noTransferMsg = {
-              hi: 'माफ कीजिए, अभी ट्रांसफर की सुविधा उपलब्ध नहीं है। मैं आपकी कैसे मदद कर सकती हूं?',
-              mr: 'माफ करा, सध्या ट्रान्सफर शक्य नाही. मी तुमची कशी मदत करू?',
-              en: 'Sorry, call transfer is not available at the moment. How else can I help you?',
-            }[userLang] || 'माफ कीजिए, अभी ट्रांसफर संभव नहीं है।';
-            streamTextToMillis(ws, streamId, noTransferMsg);
-            return;
-          }
-
-          // 1. Send transfer filler (stream stays OPEN)
-          const transferFiller = getTransferFillerForLanguage(userLang);
-          console.log('[TRANSFER] Sending filler:', transferFiller);
-          streamFillerToMillis(ws, streamId, transferFiller);
-
-          // 2. Wait for filler audio to play before firing transfer
-          await new Promise((r) => setTimeout(r, 1500));
-
-          // 3. Send Millis transfer_call event — Millis handles the rest
-          console.log('[TRANSFER] ⚡ Firing transfer_call to:', callContext.transfer_to);
-          ws.send(JSON.stringify({
-            type: 'transfer_call',
-            data: {
-              stream_id: streamId,
-              destination: callContext.transfer_to,
-            },
-          }));
-
-          return; // done — no LLM needed
-        }
-
-        // ============================================================
-        // Normal LLM flow (no transfer intent)
-        // ============================================================
         const ist = getISTDateInfo();
-        const dateTimeContext = `[SYSTEM CONTEXT - DO NOT SPEAK ALOUD]
+     const dateTimeContext = `[SYSTEM CONTEXT - DO NOT SPEAK ALOUD]
 Today's date: ${ist.isoDate}
 Today's weekday: ${ist.weekday}
 Current time (IST): ${ist.time12}
@@ -525,7 +441,9 @@ Tools available:
 
             console.log(`[LOOP ${safetyCounter}] Function calls:`, functionCalls);
 
-            // SHORT-CIRCUIT: Duplicate booking attempt
+            // ============================================================
+            // ⚡ SHORT-CIRCUIT: Duplicate booking attempt
+            // ============================================================
             const hasDuplicateBooking = functionCalls.some(
               (call) => call.name === 'book_appointment' && bookingCompleted
             );
@@ -538,7 +456,10 @@ Tools available:
               break;
             }
 
-            // FORCED FILLER — before booking tool call
+            // ============================================================
+            // ⚡ FORCED FILLER — Tool call hone se PEHLE bolo
+            // Language: user ke message se auto-detect
+            // ============================================================
             const hasNewBooking = functionCalls.some(
               (call) => call.name === 'book_appointment' && !bookingCompleted
             );
@@ -549,7 +470,9 @@ Tools available:
               fillerSent = true;
             }
 
+            // ============================================================
             // Normal tool execution
+            // ============================================================
             const functionResponses = [];
             for (const call of functionCalls) {
               const toolResult = await executeTool(call.name, call.args, callContext);
