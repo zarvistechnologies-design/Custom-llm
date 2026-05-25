@@ -3,11 +3,10 @@ const { GoogleGenerativeAI, SchemaType } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
- * 4 Tools available to all clinics:
- * 1. book_appointment        — book a new appointment
+ * 3 Tools available to all clinics:
+ * 1. book_appointment — book a new appointment
  * 2. check_doctor_availability — check available slots for a doctor on a date
- * 3. get_doctors             — get list of all doctors with their info
- * 4. transfer_call           — transfer call to human agent / doctor / receptionist
+ * 3. get_doctors — get list of all doctors with their info
  *
  * Clinic-specific details (which doctors, hours, validation rules) come
  * from the system prompt stored in DB.
@@ -87,25 +86,6 @@ const tools = [
           required: [],
         },
       },
-
-      // ============================================================
-      // TOOL 4: TRANSFER CALL
-      // ============================================================
-      {
-        name: 'transfer_call',
-        description:
-          'Transfer the call to a human agent, doctor, or receptionist. Use this ONLY when the caller explicitly asks to speak with a human, doctor, agent, receptionist, or staff — e.g. "doctor se baat karni hai", "kisi insaan se baat karo", "receptionist se connect karo", "transfer karo", "speak to someone", "talk to a human", "connect me to doctor". Do NOT use for appointment booking or general queries.',
-        parameters: {
-          type: SchemaType.OBJECT,
-          properties: {
-            reason: {
-              type: SchemaType.STRING,
-              description: 'Brief reason for the transfer, e.g. "caller requested human agent", "caller wants to speak to doctor directly".',
-            },
-          },
-          required: ['reason'],
-        },
-      },
     ],
   },
 ];
@@ -122,7 +102,7 @@ function buildModel(clinicConfig) {
   };
 
   return genAI.getGenerativeModel({
-    model: clinicConfig.model || 'gemini-2.5-flash',
+    model: clinicConfig.model || 'gemini-3.5-flash',
     systemInstruction: clinicConfig.prompt,
     generationConfig,
     tools,
