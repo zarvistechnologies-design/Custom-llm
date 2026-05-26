@@ -102,7 +102,7 @@ function buildModel(clinicConfig) {
   };
 
   return genAI.getGenerativeModel({
-    model: clinicConfig.model || 'gemini-3.5-flash',
+    model: clinicConfig.model || 'gemini-2.5-flash',
     systemInstruction: clinicConfig.prompt,
     generationConfig,
     tools,
