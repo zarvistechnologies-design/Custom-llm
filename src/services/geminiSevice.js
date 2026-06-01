@@ -28,6 +28,24 @@ const tools = [
               type: SchemaType.STRING,
               description: "Patient's name in English (e.g. Rajesh, Priya).",
             },
+            patientAge: {
+              type: SchemaType.INTEGER,
+              description:
+                'Optional. Send only if caller gave age or the clinic prompt explicitly collected it. Do not invent.',
+            },
+            patientLocation: {
+              type: SchemaType.STRING,
+              description:
+                'Optional. Send only if caller gave location/city or the clinic prompt explicitly collected it, e.g. "Ara" or "Patna". Do not invent.',
+            },
+            patient_age: {
+              type: SchemaType.INTEGER,
+              description: 'Backward-compatible alias for patientAge. Optional; send only when known.',
+            },
+            patient_location: {
+              type: SchemaType.STRING,
+              description: 'Backward-compatible alias for patientLocation. Optional; send only when known.',
+            },
             doctor_name: {
               type: SchemaType.STRING,
               description: 'Doctor full name in English (as specified in system prompt).',

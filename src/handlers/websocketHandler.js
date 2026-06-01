@@ -97,6 +97,15 @@ function getFillerForLanguage(lang) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function normalizePatientAge(value) {
+  const age = Number(value);
+  return Number.isFinite(age) && age > 0 ? age : null;
+}
+
+function normalizePatientLocation(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
 // ============================================================
 // TOOL EXECUTOR — handles all 3 tools
 // ============================================================
@@ -110,6 +119,11 @@ async function executeTool(name, args, callContext) {
 
   if (name === 'book_appointment') {
     try {
+      const patientAge = normalizePatientAge(args.patientAge ?? args.patient_age ?? args.age);
+      const patientLocation = normalizePatientLocation(
+        args.patientLocation ?? args.patient_location ?? args.location ?? args.city
+      );
+
       const payload = {
         patientName: args.patient_name,
         doctorName: args.doctor_name,
@@ -131,6 +145,17 @@ async function executeTool(name, args, callContext) {
         call_id: callContext.call_id,
         clinic_name: callContext.clinic_name,
       };
+
+      if (patientAge !== null) {
+        payload.patientAge = patientAge;
+        payload.age = patientAge;
+      }
+
+      if (patientLocation) {
+        payload.patientLocation = patientLocation;
+        payload.location = patientLocation;
+        payload.city = patientLocation;
+      }
 
       console.log('[BOOK_APPOINTMENT] Endpoint:', callContext.booking_endpoint);
       console.log('[BOOK_APPOINTMENT] Payload:', JSON.stringify(payload, null, 2));
@@ -408,7 +433,7 @@ Booking completed this call: ${bookingCompleted}
 ⚠️ When generating confirmation after booking, DO NOT include filler phrases like "बुक कर रही हूं" — system already speaks a filler before booking. Go directly to final confirmation.
 
 Tools available:
-- book_appointment: book a new appointment (ONLY use after collecting date, time, name)
+- book_appointment: book a new appointment (ONLY use after collecting date, time, name; include patientAge/patientLocation only if known)
 - check_doctor_availability: check available slots for a doctor on a date
 - get_doctors: get list of all doctors at this clinic`;
 
