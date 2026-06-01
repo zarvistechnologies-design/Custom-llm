@@ -78,7 +78,6 @@ const FILLERS = {
   hi: [
     'एक पल, आपका अपॉइंटमेंट बुक कर रही हूं...',
     'बस एक मिनट, आपका नंबर लगा रही हूं...',
-   
   ],
   mr: [
     'एक मिनिट, तुमचा नंबर लावत आहे...',
@@ -97,7 +96,6 @@ function getFillerForLanguage(lang) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-<<<<<<< HEAD
 function normalizePatientAge(value) {
   const age = Number(value);
   return Number.isFinite(age) && age > 0 ? age : null;
@@ -105,7 +103,8 @@ function normalizePatientAge(value) {
 
 function normalizePatientLocation(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
-=======
+}
+
 function deriveAvailabilityEndpoint(bookingEndpoint) {
   if (!bookingEndpoint || typeof bookingEndpoint !== 'string') return null;
 
@@ -118,7 +117,6 @@ function deriveAvailabilityEndpoint(bookingEndpoint) {
   }
 
   return null;
->>>>>>> 4dc3d8decdcbf755dbdc292b97dae5093ffd7486
 }
 
 // ============================================================
@@ -459,7 +457,7 @@ function handleConnection(ws, req) {
         console.log(`[LANG] Detected: ${userLang}`);
 
         const ist = getISTDateInfo();
-     const dateTimeContext = `[SYSTEM CONTEXT - DO NOT SPEAK ALOUD]
+        const dateTimeContext = `[SYSTEM CONTEXT - DO NOT SPEAK ALOUD]
 Today's date: ${ist.isoDate}
 Today's weekday: ${ist.weekday}
 Current time (IST): ${ist.time12}
