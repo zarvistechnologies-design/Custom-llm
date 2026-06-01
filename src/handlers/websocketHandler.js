@@ -174,10 +174,28 @@ async function executeTool(name, args, callContext) {
       };
       console.log('[CHECK_AVAILABILITY] Endpoint:', callContext.availability_endpoint);
       console.log('[CHECK_AVAILABILITY] Payload:', JSON.stringify(payload, null, 2));
-      const response = await axios.post(callContext.availability_endpoint, payload, {
-        headers,
-        timeout: 8000,
-      });
+           let response;
+      try {
+        response = await axios.post(callContext.availability_endpoint, payload, {
+          headers,
+          timeout: 8000,
+        });
+      } catch (postErr) {
+        const status = postErr.response?.status;
+        if (![404, 405].includes(status)) {
+          throw postErr;
+        }
+
+        response = await axios.get(callContext.availability_endpoint, {
+          params: {
+            assignedPhoneNumber: payload.assignedPhoneNumber,
+            doctorName: payload.doctorName,
+            date: payload.date,
+          },
+          headers,
+          timeout: 8000,
+        });
+      }
       console.log('[CHECK_AVAILABILITY] ✅ Response:', response.data);
       return { success: true, availability: response.data };
     } catch (err) {
