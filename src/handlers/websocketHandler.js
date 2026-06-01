@@ -97,6 +97,20 @@ function getFillerForLanguage(lang) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function deriveAvailabilityEndpoint(bookingEndpoint) {
+  if (!bookingEndpoint || typeof bookingEndpoint !== 'string') return null;
+
+  if (bookingEndpoint.endsWith('/api/book-appointment')) {
+    return bookingEndpoint.replace(/\/api\/book-appointment$/, '/api/availability');
+  }
+
+  if (bookingEndpoint.endsWith('/api/availability/book')) {
+    return bookingEndpoint.replace(/\/api\/availability\/book$/, '/api/availability');
+  }
+
+  return null;
+}
+
 // ============================================================
 // TOOL EXECUTOR — handles all 3 tools
 // ============================================================
@@ -159,25 +173,57 @@ async function executeTool(name, args, callContext) {
 
   if (name === 'check_doctor_availability') {
     try {
-      if (!callContext.availability_endpoint) {
+      const availabilityEndpoint =
+        callContext.availability_endpoint || deriveAvailabilityEndpoint(callContext.booking_endpoint);
+
+      if (!availabilityEndpoint) {
+        console.error('[CHECK_AVAILABILITY] Missing availability endpoint', {
+          availability_endpoint: callContext.availability_endpoint,
+          booking_endpoint: callContext.booking_endpoint,
+        });
         return { success: false, error: 'Availability endpoint not configured.' };
       }
+
       const payload = {
         doctorName: args.doctor_name,
         date: args.date,
+        time: args.time || args.appointment_time || null,
         assignedPhoneNumber: callContext.to_phone,
         doctor_name: args.doctor_name,
+        appointment_time: args.time || args.appointment_time || null,
         clinic_phone: callContext.to_phone,
         ToPhone: callContext.to_phone,
         session_id: callContext.session_id,
         clinic_name: callContext.clinic_name,
       };
-      console.log('[CHECK_AVAILABILITY] Endpoint:', callContext.availability_endpoint);
+
+      console.log('[CHECK_AVAILABILITY] Endpoint:', availabilityEndpoint);
       console.log('[CHECK_AVAILABILITY] Payload:', JSON.stringify(payload, null, 2));
-      const response = await axios.post(callContext.availability_endpoint, payload, {
-        headers,
-        timeout: 8000,
-      });
+
+      let response;
+      try {
+        response = await axios.post(availabilityEndpoint, payload, {
+          headers,
+          timeout: 8000,
+        });
+      } catch (postErr) {
+        const status = postErr.response?.status;
+        if (![404, 405].includes(status)) {
+          throw postErr;
+        }
+
+        response = await axios.get(availabilityEndpoint, {
+          params: {
+            assignedPhoneNumber: payload.assignedPhoneNumber,
+            doctorName: payload.doctorName,
+            date: payload.date,
+            time: payload.time,
+          },
+          headers,
+          timeout: 8000,
+        });
+      }
+
       console.log('[CHECK_AVAILABILITY] ✅ Response:', response.data);
       return { success: true, availability: response.data };
     } catch (err) {
