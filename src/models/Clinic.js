@@ -36,6 +36,12 @@ const clinicSchema = new mongoose.Schema(
     max_output_tokens: { type: Number, default: 1024 },
 
     active: { type: Boolean, default: true },
+
+    // Dashboard-only settings. Runtime still reads the top-level fields above.
+    dashboard_config: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
   },
   {
     timestamps: true,
