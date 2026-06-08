@@ -108,6 +108,10 @@ function normalizePatientLocation(value) {
 function deriveAvailabilityEndpoint(bookingEndpoint) {
   if (!bookingEndpoint || typeof bookingEndpoint !== 'string') return null;
 
+  if (bookingEndpoint.endsWith('/api/tankro/book')) {
+    return bookingEndpoint.replace(/\/api\/tankro\/book$/, '/api/tankro/availability');
+  }
+
   if (bookingEndpoint.endsWith('/api/book-appointment')) {
     return bookingEndpoint.replace(/\/api\/book-appointment$/, '/api/availability');
   }
@@ -117,6 +121,52 @@ function deriveAvailabilityEndpoint(bookingEndpoint) {
   }
 
   return null;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return '';
+}
+
+function firstNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
+}
+
+function isTankroEndpoint(endpoint) {
+  return /\/api\/tankro(\/|$)/i.test(String(endpoint || ''));
+}
+
+function resolveEndpoint(endpoint, callContext) {
+  let resolved = String(endpoint || '').trim();
+  const phone = encodeURIComponent(callContext.to_phone || '');
+
+  resolved = resolved
+    .replace(/\{\{\s*(agent_number|assignedPhoneNumber|clinic_phone|to_phone)\s*\}\}/gi, phone)
+    .replace(/\{(agent_number|assignedPhoneNumber|clinic_phone|to_phone)\}/gi, phone);
+
+  if (phone && /\/by-phone\/?$/i.test(resolved)) {
+    resolved = `${resolved.replace(/\/$/, '')}/${phone}`;
+  }
+
+  return resolved;
+}
+
+function normalizeServiceType(value) {
+  const service = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+  if (!service) return 'tank_cleaning';
+  if (['tank_cleaning', 'roof_care', 'callback', 'complaint', 'other'].includes(service)) return service;
+  if (service.includes('roof')) return 'roof_care';
+  if (service.includes('complaint')) return 'complaint';
+  if (service.includes('call')) return 'callback';
+  if (service.includes('tank') || service.includes('clean')) return 'tank_cleaning';
+  return 'other';
 }
 
 // ============================================================
@@ -132,22 +182,63 @@ async function executeTool(name, args, callContext) {
 
   if (name === 'book_appointment') {
     try {
+      const bookingEndpoint = resolveEndpoint(callContext.booking_endpoint, callContext);
       const patientAge = normalizePatientAge(args.patientAge ?? args.patient_age ?? args.age);
       const patientLocation = normalizePatientLocation(
         args.patientLocation ?? args.patient_location ?? args.location ?? args.city
       );
+      const appointmentDate = firstText(args.appointment_date, args.date);
+      const appointmentTime = firstText(args.appointment_time, args.time);
+
+      if (isTankroEndpoint(bookingEndpoint)) {
+        const payload = {
+          assignedPhoneNumber: callContext.to_phone,
+          customerName: firstText(args.customer_name, args.patient_name, args.name),
+          customerPhone: firstText(args.customer_phone, args.patient_phone, callContext.from_phone),
+          customerEmail: firstText(args.customer_email, args.email),
+          customerAddress: firstText(args.customer_address, args.address, args.patientLocation, args.patient_location),
+          locationId: firstText(args.location_id, args.locationId),
+          locationName: firstText(args.location_name, args.locationName, args.district, args.city),
+          district: firstText(args.district, args.location_name, args.locationName, args.city),
+          propertyType: firstText(args.property_type, args.propertyType),
+          serviceType: normalizeServiceType(firstText(args.service_type, args.serviceType, args.purpose)),
+          tankCapacityLitres: firstNumber(args.tank_capacity_litres, args.tankCapacityLitres, args.tank_capacity),
+          date: appointmentDate,
+          time: appointmentTime,
+          notes: firstText(args.notes, args.purpose),
+          source: 'millis_ai_auto',
+          callId: callContext.call_id,
+          metadata: {
+            session_id: callContext.session_id,
+            from_number: callContext.from_phone,
+            to_number: callContext.to_phone,
+            clinic_name: callContext.clinic_name,
+          },
+        };
+
+        console.log('[TANKRO_BOOKING] Endpoint:', bookingEndpoint);
+        console.log('[TANKRO_BOOKING] Payload:', JSON.stringify(payload, null, 2));
+
+        const response = await axios.post(bookingEndpoint, payload, {
+          headers,
+          timeout: 8000,
+        });
+
+        console.log('[TANKRO_BOOKING] âœ… Response:', response.data);
+        return { success: true, confirmation: response.data };
+      }
 
       const payload = {
-        patientName: args.patient_name,
+        patientName: firstText(args.patient_name, args.customer_name),
         doctorName: args.doctor_name,
-        date: args.appointment_date,
-        time: args.appointment_time,
+        date: appointmentDate,
+        time: appointmentTime,
         patientPhone: callContext.from_phone,
         assignedPhoneNumber: callContext.to_phone,
-        patient_name: args.patient_name,
+        patient_name: firstText(args.patient_name, args.customer_name),
         doctor_name: args.doctor_name,
-        appointment_date: args.appointment_date,
-        appointment_time: args.appointment_time,
+        appointment_date: appointmentDate,
+        appointment_time: appointmentTime,
         patient_phone: callContext.from_phone,
         clinic_phone: callContext.to_phone,
         FromPhone: callContext.from_phone,
@@ -157,6 +248,7 @@ async function executeTool(name, args, callContext) {
         session_id: callContext.session_id,
         call_id: callContext.call_id,
         clinic_name: callContext.clinic_name,
+        purpose: firstText(args.purpose, args.notes) || undefined,
       };
 
       if (patientAge !== null) {
@@ -170,10 +262,10 @@ async function executeTool(name, args, callContext) {
         payload.city = patientLocation;
       }
 
-      console.log('[BOOK_APPOINTMENT] Endpoint:', callContext.booking_endpoint);
+      console.log('[BOOK_APPOINTMENT] Endpoint:', bookingEndpoint);
       console.log('[BOOK_APPOINTMENT] Payload:', JSON.stringify(payload, null, 2));
 
-      const response = await axios.post(callContext.booking_endpoint, payload, {
+      const response = await axios.post(bookingEndpoint, payload, {
         headers,
         timeout: 8000,
       });
@@ -197,8 +289,10 @@ async function executeTool(name, args, callContext) {
 
   if (name === 'check_doctor_availability') {
     try {
-      const availabilityEndpoint =
-        callContext.availability_endpoint || deriveAvailabilityEndpoint(callContext.booking_endpoint);
+      const availabilityEndpoint = resolveEndpoint(
+        callContext.availability_endpoint || deriveAvailabilityEndpoint(callContext.booking_endpoint),
+        callContext
+      );
 
       if (!availabilityEndpoint) {
         console.error('[CHECK_AVAILABILITY] Missing availability endpoint', {
@@ -206,6 +300,28 @@ async function executeTool(name, args, callContext) {
           booking_endpoint: callContext.booking_endpoint,
         });
         return { success: false, error: 'Availability endpoint not configured.' };
+      }
+
+      if (isTankroEndpoint(availabilityEndpoint)) {
+        const params = {
+          assignedPhoneNumber: callContext.to_phone,
+          locationId: firstText(args.location_id, args.locationId) || undefined,
+          locationName: firstText(args.location_name, args.locationName, args.district, args.city) || undefined,
+          district: firstText(args.district, args.location_name, args.locationName, args.city) || undefined,
+          date: args.date || args.appointment_date,
+        };
+
+        console.log('[TANKRO_AVAILABILITY] Endpoint:', availabilityEndpoint);
+        console.log('[TANKRO_AVAILABILITY] Params:', JSON.stringify(params, null, 2));
+
+        const response = await axios.get(availabilityEndpoint, {
+          params,
+          headers,
+          timeout: 8000,
+        });
+
+        console.log('[TANKRO_AVAILABILITY] âœ… Response:', response.data);
+        return { success: true, availability: response.data };
       }
 
       const payload = {
@@ -263,7 +379,8 @@ async function executeTool(name, args, callContext) {
 
   if (name === 'get_doctors') {
     try {
-      if (!callContext.doctors_endpoint) {
+      const doctorsEndpoint = resolveEndpoint(callContext.doctors_endpoint, callContext);
+      if (!doctorsEndpoint) {
         return { success: false, error: 'Doctors endpoint not configured.' };
       }
       const payload = {
@@ -274,9 +391,24 @@ async function executeTool(name, args, callContext) {
         session_id: callContext.session_id,
         clinic_name: callContext.clinic_name,
       };
-      console.log('[GET_DOCTORS] Endpoint:', callContext.doctors_endpoint);
+
+      if (isTankroEndpoint(doctorsEndpoint)) {
+        console.log('[TANKRO_LOCATIONS] Endpoint:', doctorsEndpoint);
+        const response = await axios.get(doctorsEndpoint, {
+          params: {
+            district: firstText(args.district),
+            locationName: firstText(args.location_name, args.locationName),
+          },
+          headers,
+          timeout: 8000,
+        });
+        console.log('[TANKRO_LOCATIONS] âœ… Response:', response.data);
+        return { success: true, doctors: response.data, locations: response.data };
+      }
+
+      console.log('[GET_DOCTORS] Endpoint:', doctorsEndpoint);
       console.log('[GET_DOCTORS] Payload:', JSON.stringify(payload, null, 2));
-      const response = await axios.post(callContext.doctors_endpoint, payload, {
+      const response = await axios.post(doctorsEndpoint, payload, {
         headers,
         timeout: 8000,
       });
@@ -478,9 +610,9 @@ Booking completed this call: ${bookingCompleted}
 ⚠️ When generating confirmation after booking, DO NOT include filler phrases like "बुक कर रही हूं" — system already speaks a filler before booking. Go directly to final confirmation.
 
 Tools available:
-- book_appointment: book a new appointment (ONLY use after collecting date, time, name; include patientAge/patientLocation only if known)
-- check_doctor_availability: check available slots for a doctor on a date
-- get_doctors: get list of all doctors at this clinic`;
+- book_appointment: book a new appointment or service visit (ONLY use after collecting date, time, name; for Tankro include district/location and purpose/service details)
+- check_doctor_availability: check available slots for a doctor or service location on a date
+- get_doctors: get list of doctors, branches, districts, or service locations configured for this phone number`;
 
         let history = transcript.slice(0, -1).map((m) => ({
           role: m.role === 'assistant' ? 'model' : 'user',

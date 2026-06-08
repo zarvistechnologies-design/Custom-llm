@@ -3,10 +3,10 @@ const { GoogleGenerativeAI, SchemaType } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
- * 3 Tools available to all clinics:
- * 1. book_appointment — book a new appointment
- * 2. check_doctor_availability — check available slots for a doctor on a date
- * 3. get_doctors — get list of all doctors with their info
+ * 3 configurable tools available to every voice agent:
+ * 1. book_appointment — book a medical appointment or service visit
+ * 2. check_doctor_availability — check available doctor/location slots
+ * 3. get_doctors — get doctors or service locations
  *
  * Clinic-specific details (which doctors, hours, validation rules) come
  * from the system prompt stored in DB.
@@ -20,13 +20,25 @@ const tools = [
       {
         name: 'book_appointment',
         description:
-          'Book a medical appointment for the patient. Call only after collecting valid YYYY-MM-DD date (doctor available that day), valid HH:MM AM/PM time within doctor hours, and patient name in English.',
+          'Book an appointment or service visit. For medical clinics include doctor_name. For service businesses like Tankro include location_name or district, service_type, and any service details. Call only after collecting valid YYYY-MM-DD date, valid HH:MM AM/PM time, and customer/patient name in English.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
             patient_name: {
               type: SchemaType.STRING,
-              description: "Patient's name in English (e.g. Rajesh, Priya).",
+              description: "Patient/customer name in English (e.g. Rajesh, Priya).",
+            },
+            customer_name: {
+              type: SchemaType.STRING,
+              description: 'Alias for patient_name when this is a service booking.',
+            },
+            customer_phone: {
+              type: SchemaType.STRING,
+              description: 'Optional customer phone if explicitly provided. Otherwise the caller phone is used.',
+            },
+            customer_address: {
+              type: SchemaType.STRING,
+              description: 'Optional service address or customer address.',
             },
             patientAge: {
               type: SchemaType.INTEGER,
@@ -48,7 +60,39 @@ const tools = [
             },
             doctor_name: {
               type: SchemaType.STRING,
-              description: 'Doctor full name in English (as specified in system prompt).',
+              description: 'Doctor full name in English for medical bookings. Leave empty for service bookings.',
+            },
+            location_id: {
+              type: SchemaType.STRING,
+              description: 'Optional service location ID for non-medical bookings.',
+            },
+            location_name: {
+              type: SchemaType.STRING,
+              description: 'Service location, branch, or city/district name for non-medical bookings.',
+            },
+            district: {
+              type: SchemaType.STRING,
+              description: 'District/city for service bookings, e.g. Chennai or Coimbatore.',
+            },
+            service_type: {
+              type: SchemaType.STRING,
+              description: 'Service type such as tank_cleaning, roof_care, callback, complaint, or other.',
+            },
+            property_type: {
+              type: SchemaType.STRING,
+              description: 'Optional property type for service bookings, e.g. apartment, house, office.',
+            },
+            tank_capacity_litres: {
+              type: SchemaType.INTEGER,
+              description: 'Optional tank capacity in litres for Tankro bookings.',
+            },
+            purpose: {
+              type: SchemaType.STRING,
+              description: 'Short reason or purpose for the booking.',
+            },
+            notes: {
+              type: SchemaType.STRING,
+              description: 'Optional notes to save with the booking.',
             },
             appointment_date: {
               type: SchemaType.STRING,
@@ -59,7 +103,7 @@ const tools = [
               description: 'Time as "HH:MM AM/PM", e.g. "02:00 PM".',
             },
           },
-          required: ['patient_name', 'doctor_name', 'appointment_date', 'appointment_time'],
+          required: ['patient_name', 'appointment_date', 'appointment_time'],
         },
       },
 
@@ -69,20 +113,32 @@ const tools = [
       {
         name: 'check_doctor_availability',
         description:
-          'Check available time slots for a specific doctor on a given date. Use this when caller asks "kya time available hai?", "kab free hai doctor?", "konse slots khali hain?", etc. Call BEFORE booking if availability is unclear.',
+          'Check available time slots for a specific doctor or service location on a given date. For medical clinics use doctor_name. For service businesses like Tankro use location_name or district. Call BEFORE booking if availability is unclear.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
             doctor_name: {
               type: SchemaType.STRING,
-              description: 'Doctor full name in English (e.g. "Ashish Verma").',
+              description: 'Doctor full name in English for medical availability checks.',
+            },
+            location_id: {
+              type: SchemaType.STRING,
+              description: 'Optional service location ID for non-medical availability checks.',
+            },
+            location_name: {
+              type: SchemaType.STRING,
+              description: 'Service location, branch, or city/district name for non-medical availability checks.',
+            },
+            district: {
+              type: SchemaType.STRING,
+              description: 'District/city for service availability checks.',
             },
             date: {
               type: SchemaType.STRING,
               description: 'Date to check in YYYY-MM-DD format.',
             },
           },
-          required: ['doctor_name', 'date'],
+          required: ['date'],
         },
       },
 
@@ -92,13 +148,21 @@ const tools = [
       {
         name: 'get_doctors',
         description:
-          'Get the list of all doctors at this clinic with their specialities and timings. Use this when caller asks "kaun-kaun doctor hain?", "doctors ki list batao", "kaunsi speciality available hai?", or when caller is unsure which doctor to book.',
+          'Get the list of all doctors or service locations configured for this phone number. Use this when caller asks which doctors, specialities, branches, districts, or service locations are available.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
             speciality: {
               type: SchemaType.STRING,
               description: 'Optional: filter by speciality (e.g. "Gynecologist", "Urologist"). Leave empty to get all doctors.',
+            },
+            district: {
+              type: SchemaType.STRING,
+              description: 'Optional: filter service locations by district/city.',
+            },
+            location_name: {
+              type: SchemaType.STRING,
+              description: 'Optional: filter service locations by name.',
             },
           },
           required: [],

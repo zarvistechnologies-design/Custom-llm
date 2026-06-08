@@ -7,4 +7,5 @@ build/
 .DS_Store
 .vscode/
 logs/
+*.log
 .env.example

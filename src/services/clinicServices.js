@@ -1,21 +1,43 @@
 const Clinic = require('../models/Clinic');
 
-/**
- * In-memory cache: phone_number → { config, cachedAt }
- * Reduces DB hits — first call queries DB, subsequent turns use cache.
- */
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-/**
- * Default fallback if DB unreachable or clinic not found.
- */
+function normalizePhone(phone = '') {
+  return String(phone).replace(/\D/g, '').slice(-10);
+}
+
+function buildPhoneLookup(phoneNumber) {
+  const raw = String(phoneNumber || '').trim();
+  const last10 = normalizePhone(raw);
+  const variants = new Set([raw]);
+
+  if (last10) {
+    variants.add(last10);
+    variants.add(`91${last10}`);
+    variants.add(`+91${last10}`);
+  }
+
+  const clauses = [...variants]
+    .filter(Boolean)
+    .map((phone) => ({ phone_number: phone }));
+
+  if (last10) {
+    clauses.push({
+      phone_number: {
+        $regex: new RegExp(`${last10.split('').join('\\D*')}$`),
+      },
+    });
+  }
+
+  return clauses.length ? clauses : [{ phone_number: raw }];
+}
+
 const DEFAULT_CONFIG = {
   phone_number: 'default',
   name: 'Default Clinic',
-  prompt:
-    'You are a friendly receptionist. Reply briefly in Hindi.',
-  greeting: 'नमस्ते, मैं रिसेप्शन से बोल रही हूं। कैसे मदद कर सकती हूं?',
+  prompt: 'You are a friendly receptionist. Reply briefly in Hindi.',
+  greeting: 'Namaste, main reception se bol rahi hoon. Kaise madad kar sakti hoon?',
   booking_endpoint: process.env.BOOK_APPOINTMENT_URL || '',
   availability_endpoint: process.env.AVAILABILITY_URL || null,
   doctors_endpoint: process.env.DOCTORS_URL || null,
@@ -26,46 +48,51 @@ const DEFAULT_CONFIG = {
   active: true,
 };
 
-/**
- * Get clinic config by phone number.
- * Cache → DB → Default fallback.
- */
 async function getClinicConfig(phoneNumber) {
   if (!phoneNumber) {
     console.warn('[ClinicService] No phone, using default');
     return DEFAULT_CONFIG;
   }
 
-  // 1. Cache check
-  const cached = cache.get(phoneNumber);
+  const rawPhone = String(phoneNumber).trim();
+  const cacheKey = normalizePhone(rawPhone) || rawPhone;
+  const cached = cache.get(cacheKey) || cache.get(rawPhone);
+
   if (cached && Date.now() - cached.cachedAt < CACHE_TTL) {
-    console.log(`[ClinicService] ✅ Cache HIT: ${phoneNumber}`);
+    console.log(`[ClinicService] Cache HIT: ${rawPhone}`);
     return cached.config;
   }
 
-  // 2. DB query
   try {
-    console.log(`[ClinicService] Cache MISS — DB query: ${phoneNumber}`);
-    const clinic = await Clinic.findOne({ phone_number: phoneNumber, active: true }).lean();
+    console.log(`[ClinicService] Cache MISS - DB query: ${rawPhone}`);
+    const clinic = await Clinic.findOne({
+      active: true,
+      $or: buildPhoneLookup(rawPhone),
+    }).lean();
 
     if (!clinic) {
-      console.warn(`[ClinicService] ⚠️ No clinic for ${phoneNumber}, using default`);
+      console.warn(`[ClinicService] No clinic for ${rawPhone}, using default`);
       return DEFAULT_CONFIG;
     }
 
-    console.log(`[ClinicService] ✅ Loaded: ${clinic.name}`);
-    cache.set(phoneNumber, { config: clinic, cachedAt: Date.now() });
+    console.log(`[ClinicService] Loaded: ${clinic.name}`);
+    const cacheValue = { config: clinic, cachedAt: Date.now() };
+    cache.set(cacheKey, cacheValue);
+    cache.set(rawPhone, cacheValue);
+    if (clinic.phone_number) cache.set(clinic.phone_number, cacheValue);
     return clinic;
   } catch (err) {
-    console.error('[ClinicService] ❌ DB error, using default:', err.message);
+    console.error('[ClinicService] DB error, using default:', err.message);
     return DEFAULT_CONFIG;
   }
 }
 
 function clearCache(phoneNumber) {
   if (phoneNumber) {
-    cache.delete(phoneNumber);
-    console.log(`[ClinicService] Cache cleared: ${phoneNumber}`);
+    const rawPhone = String(phoneNumber).trim();
+    cache.delete(rawPhone);
+    cache.delete(normalizePhone(rawPhone));
+    console.log(`[ClinicService] Cache cleared: ${rawPhone}`);
   } else {
     cache.clear();
     console.log('[ClinicService] All cache cleared');
