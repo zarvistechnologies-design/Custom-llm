@@ -660,14 +660,17 @@ Tools available:
 
             // ============================================================
             // ⚡ FORCED FILLER — Tool call hone se PEHLE bolo
-            // Language: user ke message se auto-detect
+            // Tankro endpoints get a fixed filler; others use language-detected filler
             // ============================================================
             const hasNewBooking = functionCalls.some(
               (call) => call.name === 'book_appointment' && !bookingCompleted
             );
 
             if (hasNewBooking && !fillerSent) {
-              const filler = getFillerForLanguage(userLang);
+              const bookingEndpoint = resolveEndpoint(callContext.booking_endpoint, callContext);
+              const filler = isTankroEndpoint(bookingEndpoint)
+                ? 'एक मिनट, आपकी बुकिंग कर रही हूं...'
+                : getFillerForLanguage(userLang);
               streamFillerToMillis(ws, streamId, filler);
               fillerSent = true;
             }
