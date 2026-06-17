@@ -58,6 +58,11 @@ const tools = [
               type: SchemaType.STRING,
               description: 'Backward-compatible alias for patientLocation. Optional; send only when known.',
             },
+            patient_type: {
+              type: SchemaType.STRING,
+              description:
+                'Medical bookings only. Use "new" for first-time/new patients. Use "follow_up" for old/repeat/review/second consultation patients.',
+            },
             doctor_name: {
               type: SchemaType.STRING,
               description: 'Doctor full name in English for medical bookings. Leave empty for service bookings.',

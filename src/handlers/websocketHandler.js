@@ -105,6 +105,37 @@ function normalizePatientLocation(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
+function normalizePatientType(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+
+  if (
+    raw.includes('follow') ||
+    raw.includes('old') ||
+    raw.includes('repeat') ||
+    raw.includes('review') ||
+    raw.includes('revisit') ||
+    raw.includes('second')
+  ) {
+    return 'follow_up';
+  }
+
+  if (raw.includes('new') || raw.includes('first') || raw.includes('fresh')) {
+    return 'new';
+  }
+
+  return '';
+}
+
+function extractBookingResult(responseData) {
+  const data = responseData?.data || responseData?.appointment || responseData || {};
+  return {
+    queueNumber: data.queueNumber || data.queue_number || responseData?.queueNumber || responseData?.queue_number || null,
+    patientType: data.patientType || data.patient_type || responseData?.patientType || responseData?.patient_type || null,
+    appointmentId: data.appointmentId || data.id || data._id || responseData?.appointmentId || null,
+  };
+}
+
 function deriveAvailabilityEndpoint(bookingEndpoint) {
   if (!bookingEndpoint || typeof bookingEndpoint !== 'string') return null;
 
@@ -187,6 +218,9 @@ async function executeTool(name, args, callContext) {
       const patientLocation = normalizePatientLocation(
         args.patientLocation ?? args.patient_location ?? args.location ?? args.city
       );
+      const patientType = normalizePatientType(
+        args.patient_type ?? args.patientType ?? args.visit_type ?? args.patient_category ?? args.purpose ?? args.notes
+      );
       const appointmentDate = firstText(args.appointment_date, args.date);
       const appointmentTime = firstText(args.appointment_time, args.time);
 
@@ -251,6 +285,11 @@ async function executeTool(name, args, callContext) {
         purpose: firstText(args.purpose, args.notes) || undefined,
       };
 
+      if (patientType) {
+        payload.patientType = patientType;
+        payload.patient_type = patientType;
+      }
+
       if (patientAge !== null) {
         payload.patientAge = patientAge;
         payload.age = patientAge;
@@ -271,7 +310,17 @@ async function executeTool(name, args, callContext) {
       });
 
       console.log('[BOOK_APPOINTMENT] ✅ Response:', response.data);
-      return { success: true, confirmation: response.data };
+      const bookingResult = extractBookingResult(response.data);
+      return {
+        success: true,
+        confirmation: response.data,
+        queueNumber: bookingResult.queueNumber,
+        patientType: bookingResult.patientType,
+        appointmentId: bookingResult.appointmentId,
+        instruction: bookingResult.queueNumber
+          ? `Booking successful. Tell the caller clearly: queue number ${bookingResult.queueNumber}.`
+          : 'Booking successful. Confirm the appointment details.',
+      };
     } catch (err) {
       console.error('[BOOK_APPOINTMENT] ❌ Error:', err.message);
       if (err.response) {
@@ -515,6 +564,7 @@ function handleConnection(ws, req) {
   let clinicConfig = null;
   let model = null;
   let bookingCompleted = false;
+  let lastBookingQueueNumber = null;
 
   ws.on('message', async (data) => {
     try {
@@ -602,12 +652,15 @@ Caller phone (FromPhone): ${callContext.from_phone || 'unknown'}
 Clinic phone (ToPhone): ${callContext.to_phone || 'unknown'}
 Clinic: ${clinicConfig.name}
 Booking completed this call: ${bookingCompleted}
+Last queue number this call: ${lastBookingQueueNumber || 'none'}
 
 ⚠️ Reply per system prompt language. Time/date in user's language (e.g. Hindi: "सुबह दस बजे"), never raw English numbers.
 
 ⚠️ IMPORTANT: If "Booking completed this call: true" — DO NOT call book_appointment again. Just briefly reconfirm and end gracefully.
 
 ⚠️ When generating confirmation after booking, DO NOT include filler phrases like "बुक कर रही हूं" — system already speaks a filler before booking. Go directly to final confirmation.
+
+⚠️ If book_appointment tool response contains queueNumber, ALWAYS tell the caller that exact queue number.
 
 Tools available:
 - book_appointment: book a new appointment or service visit (ONLY use after collecting date, time, name; for Tankro include district/location and purpose/service details)
@@ -652,7 +705,9 @@ Tools available:
 
             if (hasDuplicateBooking) {
               console.log('[SKIP DUPLICATE] Booking already done — direct confirmation');
-              const text = 'जी हाँ, आपका अपॉइंटमेंट बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
+              const text = lastBookingQueueNumber
+                ? `Ji haan, aapka appointment book ho chuka hai. Queue number ${lastBookingQueueNumber} hai. Dhanyavaad!`
+                : 'जी हाँ, आपका अपॉइंटमेंट बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
               streamTextToMillis(ws, streamId, text);
               shortCircuitTriggered = true;
               break;
@@ -685,6 +740,9 @@ Tools available:
               if (call.name === 'book_appointment') {
                 if (toolResult.success) {
                   bookingCompleted = true;
+                  if (toolResult.queueNumber) {
+                    lastBookingQueueNumber = toolResult.queueNumber;
+                  }
                   console.log('[BOOKING] ✅ Marked as completed');
                 } else {
                   console.warn('[BOOKING] ❌ Real failure:', toolResult.error);
