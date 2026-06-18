@@ -318,7 +318,7 @@ async function executeTool(name, args, callContext) {
         patientType: bookingResult.patientType,
         appointmentId: bookingResult.appointmentId,
         instruction: bookingResult.queueNumber
-          ? `Booking successful. Tell the caller clearly: queue number ${bookingResult.queueNumber}.`
+          ? `Booking successful. Tell the caller clearly: aapka number ${bookingResult.queueNumber} hai. Do not say "queue number".`
           : 'Booking successful. Confirm the appointment details.',
       };
     } catch (err) {
@@ -652,7 +652,7 @@ Caller phone (FromPhone): ${callContext.from_phone || 'unknown'}
 Clinic phone (ToPhone): ${callContext.to_phone || 'unknown'}
 Clinic: ${clinicConfig.name}
 Booking completed this call: ${bookingCompleted}
-Last queue number this call: ${lastBookingQueueNumber || 'none'}
+Last appointment number this call: ${lastBookingQueueNumber || 'none'}
 
 ⚠️ Reply per system prompt language. Time/date in user's language (e.g. Hindi: "सुबह दस बजे"), never raw English numbers.
 
@@ -660,7 +660,9 @@ Last queue number this call: ${lastBookingQueueNumber || 'none'}
 
 ⚠️ When generating confirmation after booking, DO NOT include filler phrases like "बुक कर रही हूं" — system already speaks a filler before booking. Go directly to final confirmation.
 
-⚠️ If book_appointment tool response contains queueNumber, ALWAYS tell the caller that exact queue number.
+⚠️ If book_appointment tool response contains queueNumber, ALWAYS tell the caller that exact appointment number as "aapka number [number] hai".
+
+Do not speak the words "queue number" to the caller. For appointments, say "aapka number [number] hai".
 
 Tools available:
 - book_appointment: book a new appointment or service visit (ONLY use after collecting date, time, name; for Tankro include district/location and purpose/service details)
@@ -706,8 +708,8 @@ Tools available:
             if (hasDuplicateBooking) {
               console.log('[SKIP DUPLICATE] Booking already done — direct confirmation');
               const text = lastBookingQueueNumber
-                ? `Ji haan, aapka appointment book ho chuka hai. Queue number ${lastBookingQueueNumber} hai. Dhanyavaad!`
-                : 'जी हाँ, आपका अपॉइंटमेंट बुक हो चुका है। धन्यवाद! आपका दिन शुभ हो!';
+                ? `Ji haan, aapka appointment book ho gaya hai. Aapka number ${lastBookingQueueNumber} hai. Dhanyavaad!`
+                : 'Ji haan, aapka appointment book ho gaya hai. Dhanyavaad!';
               streamTextToMillis(ws, streamId, text);
               shortCircuitTriggered = true;
               break;
