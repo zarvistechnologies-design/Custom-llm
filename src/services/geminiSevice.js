@@ -20,7 +20,7 @@ const tools = [
       {
         name: 'book_appointment',
         description:
-          'Book an appointment or service visit. For medical clinics include doctor_name. For service businesses like Tankro include location_name or district, service_type, and any service details. Call only after collecting valid YYYY-MM-DD date, valid HH:MM AM/PM time, and customer/patient name in English.',
+          'Book an appointment or service visit. For medical clinics include doctor_name. For OPD queue doctors, appointment_time is optional and the backend assigns a queue number. For fixed-slot doctors and service businesses like Tankro, collect a valid HH:MM AM/PM time. Call only after collecting valid YYYY-MM-DD date and customer/patient name in English.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -105,10 +105,10 @@ const tools = [
             },
             appointment_time: {
               type: SchemaType.STRING,
-              description: 'Time as "HH:MM AM/PM", e.g. "02:00 PM".',
+              description: 'Optional for OPD queue medical bookings. Required for fixed-slot doctors and service bookings. Time as "HH:MM AM/PM", e.g. "02:00 PM".',
             },
           },
-          required: ['patient_name', 'appointment_date', 'appointment_time'],
+          required: ['patient_name', 'appointment_date'],
         },
       },
 

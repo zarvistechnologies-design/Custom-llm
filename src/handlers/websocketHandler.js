@@ -665,7 +665,7 @@ Last appointment number this call: ${lastBookingQueueNumber || 'none'}
 Do not speak the words "queue number" to the caller. For appointments, say "aapka number [number] hai".
 
 Tools available:
-- book_appointment: book a new appointment or service visit (ONLY use after collecting date, time, name; for Tankro include district/location and purpose/service details)
+- book_appointment: book a new appointment or service visit (ONLY use after collecting date and name. For OPD queue doctors, time is optional and queue number is assigned by the API. For fixed-slot doctors and Tankro, collect time; for Tankro include district/location and purpose/service details)
 - check_doctor_availability: check available slots for a doctor or service location on a date
 - get_doctors: get list of doctors, branches, districts, or service locations configured for this phone number`;
 
