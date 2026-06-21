@@ -96,6 +96,29 @@ function getFillerForLanguage(lang) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+// ============================================================
+// ⚡ AVAILABILITY-CHECK FILLER MESSAGES per language
+// ============================================================
+const AVAILABILITY_FILLERS = {
+  hi: [
+    'एक पल, उपलब्धता चेक कर रही हूं...',
+    'रुकिए, स्लॉट्स देख रही हूं...',
+  ],
+  mr: [
+    'एक मिनिट, उपलब्धता तपासत आहे...',
+    'थांबा, स्लॉट तपासत आहे...',
+  ],
+  en: [
+    'One moment, checking availability...',
+    'Just a second, let me check the slots...',
+  ],
+};
+
+function getAvailabilityFillerForLanguage(lang) {
+  const list = AVAILABILITY_FILLERS[lang] || AVAILABILITY_FILLERS.hi;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
 function normalizePatientAge(value) {
   const age = Number(value);
   return Number.isFinite(age) && age > 0 ? age : null;
@@ -660,6 +683,8 @@ Last appointment number this call: ${lastBookingQueueNumber || 'none'}
 
 ⚠️ When generating confirmation after booking, DO NOT include filler phrases like "बुक कर रही हूं" — system already speaks a filler before booking. Go directly to final confirmation.
 
+⚠️ When generating the answer after check_doctor_availability, DO NOT include filler phrases like "चेक कर रही हूं" or "देख रही हूं" — system already speaks a filler before checking. Go directly to the available slots/result.
+
 ⚠️ If book_appointment tool response contains queueNumber, ALWAYS tell the caller that exact appointment number as "aapka number [number] hai".
 
 Do not speak the words "queue number" to the caller. For appointments, say "aapka number [number] hai".
@@ -717,10 +742,15 @@ Tools available:
 
             // ============================================================
             // ⚡ FORCED FILLER — Tool call hone se PEHLE bolo
-            // Tankro endpoints get a fixed filler; others use language-detected filler
+            // Tankro endpoints get a fixed filler; others use language-detected filler.
+            // Booking takes priority; otherwise check for availability check.
             // ============================================================
             const hasNewBooking = functionCalls.some(
               (call) => call.name === 'book_appointment' && !bookingCompleted
+            );
+
+            const hasAvailabilityCheck = functionCalls.some(
+              (call) => call.name === 'check_doctor_availability'
             );
 
             if (hasNewBooking && !fillerSent) {
@@ -728,6 +758,10 @@ Tools available:
               const filler = isTankroEndpoint(bookingEndpoint)
                 ? 'एक मिनट, आपकी बुकिंग कर रही हूं...'
                 : getFillerForLanguage(userLang);
+              streamFillerToMillis(ws, streamId, filler);
+              fillerSent = true;
+            } else if (hasAvailabilityCheck && !fillerSent) {
+              const filler = getAvailabilityFillerForLanguage(userLang);
               streamFillerToMillis(ws, streamId, filler);
               fillerSent = true;
             }
