@@ -118,7 +118,7 @@ const tools = [
       {
         name: 'check_doctor_availability',
         description:
-          'Check available time slots or OPD queue status for a doctor on a date. For OPD queue doctors, use queueStatus.totalBooked and queueStatus.bookedNumbers to answer how many appointments or numbers are already booked. Call before booking or whenever the caller asks about queue count.',
+          'Check available time slots for a specific doctor or service location on a given date. For medical clinics use doctor_name. For service businesses like Tankro use location_name or district. Call BEFORE booking if availability is unclear.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
