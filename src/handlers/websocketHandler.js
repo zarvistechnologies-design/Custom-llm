@@ -414,7 +414,28 @@ async function executeTool(name, args, callContext) {
       }
 
       console.log('[CHECK_AVAILABILITY] ✅ Response:', response.data);
-      return { success: true, availability: response.data };
+
+      const availabilityRecords = Array.isArray(response.data?.doctors)
+        ? response.data.doctors
+        : response.data?.doctorId
+          ? [response.data]
+          : [];
+      const queueStatuses = availabilityRecords
+        .filter(record => record?.queueStatus)
+        .map(record => ({
+          doctorName: record.doctorName,
+          date: record.date,
+          ...record.queueStatus,
+        }));
+
+      return {
+        success: true,
+        availability: response.data,
+        queueStatus: queueStatuses.length === 1 ? queueStatuses[0] : queueStatuses,
+        instruction: queueStatuses.length > 0
+          ? 'For an OPD queue, report totalBooked and bookedNumbers exactly from queueStatus. Do not estimate from time slots.'
+          : 'Report available and booked time slots from availability.',
+      };
     } catch (err) {
       console.error('[CHECK_AVAILABILITY] ❌ Error:', err.message);
       return {
@@ -664,9 +685,11 @@ Last appointment number this call: ${lastBookingQueueNumber || 'none'}
 
 Do not speak the words "queue number" to the caller. For appointments, say "aapka number [number] hai".
 
+If the caller asks how many OPD numbers/appointments are booked, call check_doctor_availability for that doctor and date. Answer only from queueStatus.totalBooked and queueStatus.bookedNumbers; never estimate from time slots or conversation history.
+
 Tools available:
 - book_appointment: book a new appointment or service visit (ONLY use after collecting date, time, name; for Tankro include district/location and purpose/service details)
-- check_doctor_availability: check available slots for a doctor or service location on a date
+- check_doctor_availability: check available slots or OPD queue counts for a doctor on a date
 - get_doctors: get list of doctors, branches, districts, or service locations configured for this phone number`;
 
         let history = transcript.slice(0, -1).map((m) => ({
