@@ -20,7 +20,7 @@ const tools = [
       {
         name: 'book_appointment',
         description:
-          'Book an appointment or service visit. For medical clinics include doctor_name. For OPD queue doctors, appointment_time is optional and the backend assigns a queue number. For fixed-slot doctors and service businesses like Tankro, collect a valid HH:MM AM/PM time. Call only after collecting valid YYYY-MM-DD date and customer/patient name in English.',
+          'Book an appointment or service visit. For medical clinics include doctor_name. For OPD queue doctors, appointment_time is optional and the backend assigns a queue number. For follow-up/old/review patients, check availability first and book only when followUpQueueRemaining is greater than 0. For fixed-slot doctors and service businesses like Tankro, collect a valid HH:MM AM/PM time. Call only after collecting valid YYYY-MM-DD date and customer/patient name in English.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -118,7 +118,7 @@ const tools = [
       {
         name: 'check_doctor_availability',
         description:
-          'Check available time slots for a specific doctor or service location on a given date. For medical clinics use doctor_name. For service businesses like Tankro use location_name or district. Call BEFORE booking if availability is unclear.',
+          'Check available time slots or OPD queue capacity for a specific doctor or service location on a given date. For medical clinics use doctor_name. For OPD queue doctors, read followUpQueueRemaining or queueAvailability.followUp.remaining; book follow-up/old/review patients only if that value is greater than 0. For service businesses like Tankro use location_name or district. Call BEFORE booking if availability is unclear.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -137,6 +137,11 @@ const tools = [
             district: {
               type: SchemaType.STRING,
               description: 'District/city for service availability checks.',
+            },
+            patient_type: {
+              type: SchemaType.STRING,
+              description:
+                'Medical queue checks only. Use "follow_up" when checking OPD queue availability for old/repeat/review patients. Leave empty for normal fixed-slot availability and new-patient bookings.',
             },
             date: {
               type: SchemaType.STRING,

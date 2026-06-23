@@ -138,7 +138,10 @@ function normalizePatientType(value) {
     raw.includes('repeat') ||
     raw.includes('review') ||
     raw.includes('revisit') ||
-    raw.includes('second')
+    raw.includes('second') ||
+    raw.includes('purana') ||
+    raw.includes('dubara') ||
+    raw.includes('dobara')
   ) {
     return 'follow_up';
   }
@@ -148,6 +151,32 @@ function normalizePatientType(value) {
   }
 
   return '';
+}
+
+function isQueueCapacityCheck(call, userMessage = '') {
+  if (call?.name !== 'check_doctor_availability') return false;
+
+  const args = call.args || {};
+  const patientType = normalizePatientType(
+    args.patient_type ??
+    args.patientType ??
+    args.visit_type ??
+    args.patient_category ??
+    args.purpose ??
+    args.notes ??
+    userMessage
+  );
+  const explicitQueueCheck = Boolean(
+    args.queue_check ||
+    args.queueCheck ||
+    args.opd_queue ||
+    args.opdQueue ||
+    args.queueAvailability ||
+    args.queue_availability
+  );
+  const hasSpecificTime = Boolean(firstText(args.time, args.appointment_time));
+
+  return !hasSpecificTime && (patientType === 'follow_up' || explicitQueueCheck);
 }
 
 function extractBookingResult(responseData) {
@@ -210,6 +239,105 @@ function resolveEndpoint(endpoint, callContext) {
   }
 
   return resolved;
+}
+
+function pickDoctorAvailability(availabilityData, doctorName) {
+  const data = availabilityData?.data || availabilityData || {};
+  const doctors = Array.isArray(data.doctors)
+    ? data.doctors
+    : (data.doctorName || data.queueAvailability ? [data] : []);
+
+  if (doctors.length === 0) return null;
+
+  const cleanDoctorName = String(doctorName || '')
+    .replace(/^(doctor\.?\s*|dr\.?\s*)/i, '')
+    .trim()
+    .toLowerCase();
+
+  if (!cleanDoctorName) return doctors[0];
+
+  return doctors.find((doctor) => {
+    const name = String(doctor.doctorName || doctor.name || '')
+      .replace(/^(doctor\.?\s*|dr\.?\s*)/i, '')
+      .trim()
+      .toLowerCase();
+    return name.includes(cleanDoctorName) || cleanDoctorName.includes(name);
+  }) || doctors[0];
+}
+
+function extractFollowUpQueueAvailability(availabilityData, doctorName) {
+  const doctorAvailability = pickDoctorAvailability(availabilityData, doctorName);
+  if (!doctorAvailability) return null;
+
+  const followUp = doctorAvailability.queueAvailability?.followUp;
+  const remaining = Number(
+    doctorAvailability.followUpQueueRemaining ??
+    followUp?.remaining
+  );
+
+  if (!Number.isFinite(remaining)) return null;
+
+  const canBook = typeof doctorAvailability.canBookFollowUp === 'boolean'
+    ? doctorAvailability.canBookFollowUp
+    : (typeof followUp?.canBook === 'boolean' ? followUp.canBook : remaining > 0);
+
+  return {
+    remaining,
+    canBook,
+    booked: Number(followUp?.booked),
+    capacity: Number(followUp?.capacity),
+    doctor: doctorAvailability.doctorName || doctorAvailability.name || doctorName || '',
+  };
+}
+
+async function fetchMedicalAvailability({ args, callContext, headers, appointmentDate, appointmentTime }) {
+  const availabilityEndpoint = resolveEndpoint(
+    callContext.availability_endpoint || deriveAvailabilityEndpoint(callContext.booking_endpoint),
+    callContext
+  );
+
+  if (!availabilityEndpoint) {
+    return { success: false, error: 'Availability endpoint not configured.' };
+  }
+
+  const payload = {
+    doctorName: args.doctor_name,
+    date: appointmentDate,
+    time: appointmentTime || null,
+    assignedPhoneNumber: callContext.to_phone,
+    doctor_name: args.doctor_name,
+    appointment_time: appointmentTime || null,
+    patient_type: args.patient_type || args.patientType || null,
+    clinic_phone: callContext.to_phone,
+    ToPhone: callContext.to_phone,
+    session_id: callContext.session_id,
+    clinic_name: callContext.clinic_name,
+  };
+
+  try {
+    const response = await axios.post(availabilityEndpoint, payload, {
+      headers,
+      timeout: 8000,
+    });
+    return { success: true, availability: response.data };
+  } catch (postErr) {
+    const status = postErr.response?.status;
+    if (![404, 405].includes(status)) {
+      throw postErr;
+    }
+
+    const response = await axios.get(availabilityEndpoint, {
+      params: {
+        assignedPhoneNumber: payload.assignedPhoneNumber,
+        doctorName: payload.doctorName,
+        date: payload.date,
+        time: payload.time,
+      },
+      headers,
+      timeout: 8000,
+    });
+    return { success: true, availability: response.data };
+  }
 }
 
 function normalizeServiceType(value) {
@@ -283,6 +411,36 @@ async function executeTool(name, args, callContext) {
 
         console.log('[TANKRO_BOOKING] âœ… Response:', response.data);
         return { success: true, confirmation: response.data };
+      }
+
+      if (patientType === 'follow_up') {
+        const availabilityResult = await fetchMedicalAvailability({
+          args,
+          callContext,
+          headers,
+          appointmentDate,
+          appointmentTime,
+        });
+
+        if (!availabilityResult.success) {
+          return {
+            success: false,
+            error: availabilityResult.error,
+            instruction: 'Could not check follow-up queue availability. Do NOT confirm booking. Ask caller to try again or contact reception.',
+          };
+        }
+
+        const followUpQueue = extractFollowUpQueueAvailability(availabilityResult.availability, args.doctor_name);
+        if (followUpQueue && (!followUpQueue.canBook || followUpQueue.remaining <= 0)) {
+          return {
+            success: false,
+            error: 'Follow-up queue is full for this date.',
+            queueFull: true,
+            followUpQueue,
+            availability: availabilityResult.availability,
+            instruction: 'Follow-up queue is full. Do NOT confirm booking. Politely ask the caller to choose another date or contact reception.',
+          };
+        }
       }
 
       const payload = {
@@ -403,6 +561,7 @@ async function executeTool(name, args, callContext) {
         assignedPhoneNumber: callContext.to_phone,
         doctor_name: args.doctor_name,
         appointment_time: args.time || args.appointment_time || null,
+        patient_type: args.patient_type || args.patientType || null,
         clinic_phone: callContext.to_phone,
         ToPhone: callContext.to_phone,
         session_id: callContext.session_id,
@@ -690,8 +849,8 @@ Last appointment number this call: ${lastBookingQueueNumber || 'none'}
 Do not speak the words "queue number" to the caller. For appointments, say "aapka number [number] hai".
 
 Tools available:
-- book_appointment: book a new appointment or service visit (ONLY use after collecting date and name. For OPD queue doctors, time is optional and queue number is assigned by the API. For fixed-slot doctors and Tankro, collect time; for Tankro include district/location and purpose/service details)
-- check_doctor_availability: check available slots for a doctor or service location on a date
+- book_appointment: book a new appointment or service visit (ONLY use after collecting date and name. For follow-up/old/review patients, check availability first and book only if followUpQueueRemaining is greater than 0. For OPD queue doctors, time is optional and queue number is assigned by the API. For fixed-slot doctors and Tankro, collect time; for Tankro include district/location and purpose/service details)
+- check_doctor_availability: check available slots or OPD queue capacity for a doctor or service location on a date. For follow-up/old/review queue capacity, send patient_type as follow_up; this check is silent and should not use availability filler.
 - get_doctors: get list of doctors, branches, districts, or service locations configured for this phone number`;
 
         let history = transcript.slice(0, -1).map((m) => ({
@@ -750,7 +909,7 @@ Tools available:
             );
 
             const hasAvailabilityCheck = functionCalls.some(
-              (call) => call.name === 'check_doctor_availability'
+              (call) => call.name === 'check_doctor_availability' && !isQueueCapacityCheck(call, userMessage)
             );
 
             if (hasNewBooking && !fillerSent) {
