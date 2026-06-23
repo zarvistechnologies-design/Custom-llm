@@ -179,20 +179,6 @@ function isQueueCapacityCheck(call, userMessage = '') {
   return !hasSpecificTime && (patientType === 'follow_up' || explicitQueueCheck);
 }
 
-function isFollowUpQueueBooking(args = {}) {
-  const patientType = normalizePatientType(
-    args.patient_type ??
-    args.patientType ??
-    args.visit_type ??
-    args.patient_category ??
-    args.purpose ??
-    args.notes
-  );
-  const hasSpecificTime = Boolean(firstText(args.time, args.appointment_time));
-
-  return patientType === 'follow_up' && !hasSpecificTime;
-}
-
 function extractBookingResult(responseData) {
   const data = responseData?.data || responseData?.appointment || responseData || {};
   return {
@@ -280,21 +266,6 @@ function pickDoctorAvailability(availabilityData, doctorName) {
 }
 
 function extractFollowUpQueueAvailability(availabilityData, doctorName) {
-  const flatQueue = availabilityData?.data || availabilityData || {};
-  if (
-    Object.prototype.hasOwnProperty.call(flatQueue, 'full') &&
-    Object.prototype.hasOwnProperty.call(flatQueue, 'remaining')
-  ) {
-    const remaining = Number(flatQueue.remaining);
-    return {
-      remaining: Number.isFinite(remaining) ? remaining : 0,
-      canBook: flatQueue.full !== true && remaining > 0,
-      booked: Number(flatQueue.booked),
-      capacity: Number(flatQueue.limit),
-      doctor: doctorName || '',
-    };
-  }
-
   const doctorAvailability = pickDoctorAvailability(availabilityData, doctorName);
   if (!doctorAvailability) return null;
 
@@ -317,31 +288,6 @@ function extractFollowUpQueueAvailability(availabilityData, doctorName) {
     capacity: Number(followUp?.capacity),
     doctor: doctorAvailability.doctorName || doctorAvailability.name || doctorName || '',
   };
-}
-
-async function fetchQueueStatusAvailability({ args, callContext, headers, appointmentDate }) {
-  const availabilityEndpoint = resolveEndpoint(
-    callContext.availability_endpoint || deriveAvailabilityEndpoint(callContext.booking_endpoint),
-    callContext
-  );
-
-  if (!availabilityEndpoint) {
-    return { success: false, error: 'Availability endpoint not configured.' };
-  }
-
-  const response = await axios.get(availabilityEndpoint, {
-    params: {
-      assignedPhoneNumber: callContext.to_phone,
-      doctorName: args.doctor_name,
-      date: appointmentDate,
-      queueStatus: true,
-      patient_type: args.patient_type || args.patientType || 'follow_up',
-    },
-    headers,
-    timeout: 3000,
-  });
-
-  return { success: true, availability: response.data };
 }
 
 async function fetchMedicalAvailability({ args, callContext, headers, appointmentDate, appointmentTime }) {
@@ -467,12 +413,13 @@ async function executeTool(name, args, callContext) {
         return { success: true, confirmation: response.data };
       }
 
-      if (patientType === 'follow_up' && !appointmentTime) {
-        const availabilityResult = await fetchQueueStatusAvailability({
+      if (patientType === 'follow_up') {
+        const availabilityResult = await fetchMedicalAvailability({
           args,
           callContext,
           headers,
           appointmentDate,
+          appointmentTime,
         });
 
         if (!availabilityResult.success) {
@@ -605,26 +552,6 @@ async function executeTool(name, args, callContext) {
 
         console.log('[TANKRO_AVAILABILITY] âœ… Response:', response.data);
         return { success: true, availability: response.data };
-      }
-
-      if (isQueueCapacityCheck({ name: 'check_doctor_availability', args }, '')) {
-        const queueResult = await fetchQueueStatusAvailability({
-          args,
-          callContext,
-          headers,
-          appointmentDate: args.date || args.appointment_date,
-        });
-
-        if (!queueResult.success) {
-          return {
-            success: false,
-            error: queueResult.error,
-            instruction: 'Could not fetch queue availability.',
-          };
-        }
-
-        console.log('[QUEUE_AVAILABILITY] Response:', queueResult.availability);
-        return { success: true, availability: queueResult.availability };
       }
 
       const payload = {
@@ -922,8 +849,8 @@ Last appointment number this call: ${lastBookingQueueNumber || 'none'}
 Do not speak the words "queue number" to the caller. For appointments, say "aapka number [number] hai".
 
 Tools available:
-- book_appointment: book a new appointment or service visit (ONLY use after collecting date and name. For follow-up/old/review OPD queue patients with no fixed time, queue availability uses the existing check_doctor_availability path and returns {full, booked, limit, remaining}; book only if full is false and remaining is greater than 0. For fixed-time slot checks, do not use queue status. For OPD queue doctors, time is optional and queue number is assigned by the API. For fixed-slot doctors and Tankro, collect time; for Tankro include district/location and purpose/service details)
-- check_doctor_availability: check available slots or OPD queue capacity for a doctor or service location on a date. For follow-up/old/review OPD queue capacity with no fixed time, send patient_type as follow_up; queue checks return {full, booked, limit, remaining}. If a time is provided, this is a normal slot check.
+- book_appointment: book a new appointment or service visit (ONLY use after collecting date and name. For follow-up/old/review patients, check availability first and book only if followUpQueueRemaining is greater than 0. For OPD queue doctors, time is optional and queue number is assigned by the API. For fixed-slot doctors and Tankro, collect time; for Tankro include district/location and purpose/service details)
+- check_doctor_availability: check available slots or OPD queue capacity for a doctor or service location on a date. For follow-up/old/review queue capacity, send patient_type as follow_up; this check is silent and should not use availability filler.
 - get_doctors: get list of doctors, branches, districts, or service locations configured for this phone number`;
 
         let history = transcript.slice(0, -1).map((m) => ({
@@ -978,10 +905,7 @@ Tools available:
             // Booking takes priority; otherwise check for availability check.
             // ============================================================
             const hasNewBooking = functionCalls.some(
-              (call) =>
-                call.name === 'book_appointment' &&
-                !bookingCompleted &&
-                !isFollowUpQueueBooking(call.args || {})
+              (call) => call.name === 'book_appointment' && !bookingCompleted
             );
 
             const hasAvailabilityCheck = functionCalls.some(
