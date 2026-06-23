@@ -20,7 +20,7 @@ const tools = [
       {
         name: 'book_appointment',
         description:
-          'Book an appointment or service visit. For medical clinics include doctor_name. For OPD queue doctors, appointment_time is optional and the backend assigns a queue number. For follow-up/old/review patients, check availability first and book only when followUpQueueRemaining is greater than 0. For fixed-slot doctors and service businesses like Tankro, collect a valid HH:MM AM/PM time. Call only after collecting valid YYYY-MM-DD date and customer/patient name in English.',
+          'Book an appointment or service visit. For medical clinics include doctor_name. For OPD queue doctors, appointment_time is optional and the backend assigns a queue number. For follow-up/old/review OPD queue patients with no fixed time, queue availability uses the existing check_doctor_availability path and returns {full, booked, limit, remaining}; book only when full is false and remaining is greater than 0. If a time is provided, treat it as a normal fixed-slot check, not queue status. For fixed-slot doctors and service businesses like Tankro, collect a valid HH:MM AM/PM time. Call only after collecting valid YYYY-MM-DD date and customer/patient name in English.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -118,7 +118,7 @@ const tools = [
       {
         name: 'check_doctor_availability',
         description:
-          'Check available time slots or OPD queue capacity for a specific doctor or service location on a given date. For medical clinics use doctor_name. For OPD queue doctors, read followUpQueueRemaining or queueAvailability.followUp.remaining; book follow-up/old/review patients only if that value is greater than 0. For service businesses like Tankro use location_name or district. Call BEFORE booking if availability is unclear.',
+          'Check available time slots or OPD queue capacity for a specific doctor or service location on a given date. For medical clinics use doctor_name. OPD queue checks with no fixed time return {full, booked, limit, remaining}; book follow-up/old/review patients only if full is false and remaining is greater than 0. If a time is provided, treat it as a normal slot check. For service businesses like Tankro use location_name or district. Call BEFORE booking if availability is unclear.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
