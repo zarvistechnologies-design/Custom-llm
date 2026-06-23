@@ -141,12 +141,26 @@ function normalizePatientType(value) {
     raw.includes('second') ||
     raw.includes('purana') ||
     raw.includes('dubara') ||
-    raw.includes('dobara')
+    raw.includes('dobara') ||
+    raw.includes('पुरान') ||
+    raw.includes('फॉलो') ||
+    raw.includes('दोबारा') ||
+    raw.includes('दुबारा') ||
+    raw.includes('रिव्यू') ||
+    raw.includes('पहले आ') ||
+    raw.includes('पहले मिल')
   ) {
     return 'follow_up';
   }
 
-  if (raw.includes('new') || raw.includes('first') || raw.includes('fresh')) {
+  if (
+    raw.includes('new') ||
+    raw.includes('first') ||
+    raw.includes('fresh') ||
+    raw.includes('पहली बार') ||
+    raw.includes('नया') ||
+    raw.includes('नई')
+  ) {
     return 'new';
   }
 
@@ -167,6 +181,8 @@ function isQueueCapacityCheck(call, userMessage = '') {
     userMessage
   );
   const explicitQueueCheck = Boolean(
+    args.background_check ||
+    args.backgroundCheck ||
     args.queue_check ||
     args.queueCheck ||
     args.opd_queue ||
@@ -177,6 +193,15 @@ function isQueueCapacityCheck(call, userMessage = '') {
   const hasSpecificTime = Boolean(firstText(args.time, args.appointment_time));
 
   return !hasSpecificTime && (patientType === 'follow_up' || explicitQueueCheck);
+}
+
+function isBackgroundQueueCheck(call) {
+  if (call?.name !== 'check_doctor_availability') return false;
+  const args = call.args || {};
+  const requested = args.background_check === true || args.backgroundCheck === true;
+  const hasDate = Boolean(firstText(args.date, args.appointment_date));
+  const hasSpecificTime = Boolean(firstText(args.time, args.appointment_time));
+  return requested && hasDate && !hasSpecificTime;
 }
 
 function extractBookingResult(responseData) {
@@ -266,6 +291,22 @@ function pickDoctorAvailability(availabilityData, doctorName) {
 }
 
 function extractFollowUpQueueAvailability(availabilityData, doctorName) {
+  const flat = availabilityData?.data || availabilityData || {};
+  if (
+    Object.prototype.hasOwnProperty.call(flat, 'booked') &&
+    Object.prototype.hasOwnProperty.call(flat, 'followUpQueueRemaining')
+  ) {
+    const remaining = Number(flat.followUpQueueRemaining);
+    return {
+      remaining: Number.isFinite(remaining) ? remaining : 0,
+      canBook: flat.canBookFollowUp !== false && flat.full !== true && remaining > 0,
+      booked: Number(flat.followUpBooked || 0),
+      capacity: Number(flat.followUpCapacity || 0),
+      totalBooked: Number(flat.booked || 0),
+      doctor: doctorName || '',
+    };
+  }
+
   const doctorAvailability = pickDoctorAvailability(availabilityData, doctorName);
   if (!doctorAvailability) return null;
 
@@ -286,6 +327,9 @@ function extractFollowUpQueueAvailability(availabilityData, doctorName) {
     canBook,
     booked: Number(followUp?.booked),
     capacity: Number(followUp?.capacity),
+    totalBooked: Array.isArray(doctorAvailability.bookedSlots)
+      ? doctorAvailability.bookedSlots.length
+      : Number(doctorAvailability.bookedCount || 0),
     doctor: doctorAvailability.doctorName || doctorAvailability.name || doctorName || '',
   };
 }
@@ -338,6 +382,133 @@ async function fetchMedicalAvailability({ args, callContext, headers, appointmen
     });
     return { success: true, availability: response.data };
   }
+}
+
+function getQueueCheckDate(args = {}) {
+  return firstText(args.date, args.appointment_date);
+}
+
+function isSundayDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return false;
+  const value = new Date(`${date}T12:00:00+05:30`);
+  if (Number.isNaN(value.getTime())) return false;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short',
+  }).format(value) === 'Sun';
+}
+
+function applyQueueDateLimit(availability, date) {
+  const data = availability?.data || availability || {};
+  const booked = Number(data.booked || 0);
+  const apiLimit = Number(data.limit || 80);
+  const effectiveLimit = isSundayDate(date) ? 45 : apiLimit;
+  const remaining = Math.max(0, effectiveLimit - booked);
+  const followUpRemaining = Number(data.followUpQueueRemaining);
+  const followUpFull = Number.isFinite(followUpRemaining) && followUpRemaining <= 0;
+
+  return {
+    ...data,
+    full: data.full === true || remaining <= 0 || followUpFull,
+    limit: effectiveLimit,
+    remaining,
+    sundayLimitApplied: effectiveLimit === 45,
+  };
+}
+
+async function fetchQueueStatusAvailability({ args, callContext }) {
+  const availabilityEndpoint = resolveEndpoint(
+    callContext.availability_endpoint || deriveAvailabilityEndpoint(callContext.booking_endpoint),
+    callContext
+  );
+  const date = getQueueCheckDate(args);
+
+  if (!availabilityEndpoint || !date) {
+    return { success: false, error: 'Queue availability endpoint or date is missing.' };
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (callContext.booking_auth_header) headers.Authorization = callContext.booking_auth_header;
+
+  const response = await axios.get(availabilityEndpoint, {
+    params: {
+      assignedPhoneNumber: callContext.to_phone,
+      doctorName: args.doctor_name,
+      date,
+      queueStatus: true,
+      patient_type: 'follow_up',
+    },
+    headers,
+    timeout: 3000,
+  });
+
+  return {
+    success: true,
+    availability: applyQueueDateLimit(response.data, date),
+    date,
+  };
+}
+
+function startBackgroundQueueCheck(args, callContext) {
+  const date = getQueueCheckDate(args);
+  if (!date) return null;
+  if (callContext.checked_dates.has(date)) {
+    return Promise.resolve(callContext.checked_dates.get(date).result);
+  }
+  if (callContext.in_flight_checks.has(date)) {
+    return callContext.in_flight_checks.get(date).promise;
+  }
+  if (callContext.availability_call_count >= 2) return null;
+
+  callContext.availability_call_count += 1;
+  callContext.selected_appointment_date = date;
+  const promise = fetchQueueStatusAvailability({ args, callContext })
+    .catch((error) => ({
+      success: false,
+      error: error.response?.data?.error || error.message,
+      date,
+    }))
+    .then((result) => {
+      callContext.checked_dates.set(date, { result, checkedAt: Date.now() });
+      callContext.in_flight_checks.delete(date);
+      console.log(`[QUEUE_BACKGROUND] Completed for ${date}:`, result.success);
+      return result;
+    });
+
+  callContext.in_flight_checks.set(date, {
+    doctorName: firstText(args.doctor_name),
+    promise,
+    startedAt: Date.now(),
+  });
+  console.log(`[QUEUE_BACKGROUND] Started for ${date}`);
+  return promise;
+}
+
+async function getStoredQueueCheck(args, callContext) {
+  const date = getQueueCheckDate(args) || callContext.selected_appointment_date;
+  if (!date) return null;
+
+  const checked = callContext.checked_dates.get(date);
+  if (checked) return checked.result;
+
+  const inFlight = callContext.in_flight_checks.get(date);
+  return inFlight ? inFlight.promise : null;
+}
+
+function getQueueRuntimeContext(callContext) {
+  const date = callContext.selected_appointment_date;
+  if (!date) return 'No queue availability check has started.';
+
+  const checked = callContext.checked_dates.get(date);
+  if (checked) {
+    return `checkedDates[${date}] = ${JSON.stringify(checked.result)}`;
+  }
+
+  if (callContext.in_flight_checks.has(date)) {
+    return `checkedDates[${date}] = pending in background`;
+  }
+
+  return `checkedDates[${date}] = unavailable`;
 }
 
 function normalizeServiceType(value) {
@@ -413,8 +584,12 @@ async function executeTool(name, args, callContext) {
         return { success: true, confirmation: response.data };
       }
 
-      if (patientType === 'follow_up') {
-        const availabilityResult = await fetchMedicalAvailability({
+      const sundayBooking = isSundayDate(appointmentDate);
+      const queueArgs = { ...args, date: appointmentDate };
+      const storedQueueResult = await getStoredQueueCheck(queueArgs, callContext);
+      const queueFlowActive = Boolean(storedQueueResult);
+      if (patientType === 'follow_up' || (sundayBooking && queueFlowActive)) {
+        const availabilityResult = storedQueueResult || await fetchMedicalAvailability({
           args,
           callContext,
           headers,
@@ -426,19 +601,23 @@ async function executeTool(name, args, callContext) {
           return {
             success: false,
             error: availabilityResult.error,
-            instruction: 'Could not check follow-up queue availability. Do NOT confirm booking. Ask caller to try again or contact reception.',
+            instruction: 'Could not check queue availability. Do NOT confirm booking. Ask caller to try again or contact reception.',
           };
         }
 
         const followUpQueue = extractFollowUpQueueAvailability(availabilityResult.availability, args.doctor_name);
-        if (followUpQueue && (!followUpQueue.canBook || followUpQueue.remaining <= 0)) {
+        const sundayFull = queueFlowActive && sundayBooking &&
+          Number(followUpQueue?.totalBooked || 0) >= 45;
+        const followUpFull = patientType === 'follow_up' &&
+          followUpQueue && (!followUpQueue.canBook || followUpQueue.remaining <= 0);
+        if (sundayFull || followUpFull) {
           return {
             success: false,
-            error: 'Follow-up queue is full for this date.',
+            error: 'Queue is full for this date.',
             queueFull: true,
             followUpQueue,
             availability: availabilityResult.availability,
-            instruction: 'Follow-up queue is full. Do NOT confirm booking. Politely ask the caller to choose another date or contact reception.',
+            instruction: 'Queue is full. Do NOT confirm booking. Tell the caller this date is full and offer the next day.',
           };
         }
       }
@@ -552,6 +731,16 @@ async function executeTool(name, args, callContext) {
 
         console.log('[TANKRO_AVAILABILITY] âœ… Response:', response.data);
         return { success: true, availability: response.data };
+      }
+
+      if (isQueueCapacityCheck({ name: 'check_doctor_availability', args }, '')) {
+        const storedResult = await getStoredQueueCheck(args, callContext);
+        if (storedResult) {
+          console.log(`[QUEUE_BACKGROUND] Reused for ${getQueueCheckDate(args)}`);
+          return { ...storedResult, reused: true };
+        }
+
+        return fetchQueueStatusAvailability({ args, callContext });
       }
 
       const payload = {
@@ -741,6 +930,10 @@ function handleConnection(ws, req) {
     availability_endpoint: null,
     doctors_endpoint: null,
     booking_auth_header: null,
+    checked_dates: new Map(),
+    in_flight_checks: new Map(),
+    availability_call_count: 0,
+    selected_appointment_date: null,
   };
 
   let clinicConfig = null;
@@ -820,7 +1013,18 @@ function handleConnection(ws, req) {
         const userLang = detectLanguage(userMessage);
         console.log(`[LANG] Detected: ${userLang}`);
 
+        if (
+          normalizePatientType(userMessage) === 'follow_up' &&
+          callContext.selected_appointment_date
+        ) {
+          await getStoredQueueCheck(
+            { date: callContext.selected_appointment_date },
+            callContext
+          );
+        }
+
         const ist = getISTDateInfo();
+        const queueRuntimeContext = getQueueRuntimeContext(callContext);
         const dateTimeContext = `[SYSTEM CONTEXT - DO NOT SPEAK ALOUD]
 Today's date: ${ist.isoDate}
 Today's weekday: ${ist.weekday}
@@ -835,6 +1039,8 @@ Clinic phone (ToPhone): ${callContext.to_phone || 'unknown'}
 Clinic: ${clinicConfig.name}
 Booking completed this call: ${bookingCompleted}
 Last appointment number this call: ${lastBookingQueueNumber || 'none'}
+Runtime queue state: ${queueRuntimeContext}
+Runtime availability API call count: ${callContext.availability_call_count}
 
 ⚠️ Reply per system prompt language. Time/date in user's language (e.g. Hindi: "सुबह दस बजे"), never raw English numbers.
 
@@ -847,6 +1053,13 @@ Last appointment number this call: ${lastBookingQueueNumber || 'none'}
 ⚠️ If book_appointment tool response contains queueNumber, ALWAYS tell the caller that exact appointment number as "aapka number [number] hai".
 
 Do not speak the words "queue number" to the caller. For appointments, say "aapka number [number] hai".
+
+Queue background flow (OPD queue doctors only):
+- Immediately after resolving the requested date, call check_doctor_availability once with background_check=true, patient_type=follow_up, doctor_name, and the YYYY-MM-DD date.
+- Do not produce text with that tool call. The runtime asks the patient name while the API runs.
+- On later turns, read Runtime queue state above. Do not call availability again for a date already present in checkedDates.
+- New patients ignore the stored result except that Sunday total capacity still applies. Follow-up patients must obey the stored result.
+- Never set background_check for fixed-slot doctors or service businesses.
 
 Tools available:
 - book_appointment: book a new appointment or service visit (ONLY use after collecting date and name. For follow-up/old/review patients, check availability first and book only if followUpQueueRemaining is greater than 0. For OPD queue doctors, time is optional and queue number is assigned by the API. For fixed-slot doctors and Tankro, collect time; for Tankro include district/location and purpose/service details)
@@ -881,6 +1094,47 @@ Tools available:
             if (!functionCalls || functionCalls.length === 0) break;
 
             console.log(`[LOOP ${safetyCounter}] Function calls:`, functionCalls);
+
+            const backgroundQueueCall = functionCalls.find(isBackgroundQueueCheck);
+            if (backgroundQueueCall) {
+              if (bookingCompleted) {
+                const completedText = lastBookingQueueNumber
+                  ? `Ji haan, aapka number ${lastBookingQueueNumber} hai.`
+                  : 'Ji haan, aapka appointment book ho chuka hai.';
+                streamTextToMillis(ws, streamId, completedText);
+                return;
+              }
+
+              const backgroundPromise = startBackgroundQueueCheck(
+                backgroundQueueCall.args || {},
+                callContext
+              );
+              if (!backgroundPromise) {
+                streamTextToMillis(
+                  ws,
+                  streamId,
+                  'सही दिन का नंबर लगाने के लिए क्या मैं हॉस्पिटल से कॉल करवा दूं?'
+                );
+                return;
+              }
+
+              const patientNameKnown = Boolean(firstText(
+                backgroundQueueCall.args?.patient_name,
+                backgroundQueueCall.args?.patientName
+              ));
+              const nextQuestion = patientNameKnown
+                ? (userLang === 'en'
+                    ? 'Is the patient new or follow-up?'
+                    : (userLang === 'mr'
+                        ? 'Patient nava aahe ki follow-up?'
+                        : 'मरीज़ पहली बार आ रहे हैं या पुराने हैं?'))
+                : (userLang === 'en'
+                    ? 'What is the patient name?'
+                    : (userLang === 'mr' ? 'Patientche naav kay aahe?' : 'आपका नाम क्या है?'));
+              streamTextToMillis(ws, streamId, nextQuestion);
+              console.log('[QUEUE_BACKGROUND] Next booking question sent without waiting');
+              return;
+            }
 
             // ============================================================
             // ⚡ SHORT-CIRCUIT: Duplicate booking attempt

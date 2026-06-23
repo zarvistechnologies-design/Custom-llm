@@ -118,7 +118,7 @@ const tools = [
       {
         name: 'check_doctor_availability',
         description:
-          'Check available time slots or OPD queue capacity for a specific doctor or service location on a given date. For medical clinics use doctor_name. For OPD queue doctors, read followUpQueueRemaining or queueAvailability.followUp.remaining; book follow-up/old/review patients only if that value is greater than 0. For service businesses like Tankro use location_name or district. Call BEFORE booking if availability is unclear.',
+          'Check available time slots or OPD queue capacity for a specific doctor or service location on a given date. OPD queue doctors only: immediately after the date is known, call once with background_check=true and patient_type="follow_up"; the runtime stores the result while continuing the conversation. Never use background_check for fixed-slot doctors or service businesses. For follow-up/old/review patients, use the stored result and book only when it permits booking. For service businesses like Tankro use location_name or district.',
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
@@ -146,6 +146,10 @@ const tools = [
             patient_name: {
               type: SchemaType.STRING,
               description: 'Optional collected patient name in English for medical queue checks.',
+            },
+            background_check: {
+              type: SchemaType.BOOLEAN,
+              description: 'OPD queue doctors only. Set true once immediately after the appointment date is resolved and before asking the patient name. Never use for fixed-slot or service availability.',
             },
             date: {
               type: SchemaType.STRING,
