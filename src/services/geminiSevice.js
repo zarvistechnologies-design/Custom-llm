@@ -145,7 +145,7 @@ const tools = [
             },
             patient_name: {
               type: SchemaType.STRING,
-              description: 'Collected patient name in English. Include it for medical queue checks so the agent can acknowledge the patient by name.',
+              description: 'Optional collected patient name in English for medical queue checks.',
             },
             date: {
               type: SchemaType.STRING,
