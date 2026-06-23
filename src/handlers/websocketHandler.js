@@ -119,6 +119,11 @@ function getAvailabilityFillerForLanguage(lang) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function getQueueAvailabilityAcknowledgement(args = {}) {
+  const patientName = firstText(args.patient_name, args.patientName, args.name);
+  return patientName ? `Theek hai ${patientName} ji.` : 'Theek hai ji.';
+}
+
 function normalizePatientAge(value) {
   const age = Number(value);
   return Number.isFinite(age) && age > 0 ? age : null;
@@ -850,7 +855,7 @@ Do not speak the words "queue number" to the caller. For appointments, say "aapk
 
 Tools available:
 - book_appointment: book a new appointment or service visit (ONLY use after collecting date and name. For follow-up/old/review patients, check availability first and book only if followUpQueueRemaining is greater than 0. For OPD queue doctors, time is optional and queue number is assigned by the API. For fixed-slot doctors and Tankro, collect time; for Tankro include district/location and purpose/service details)
-- check_doctor_availability: check available slots or OPD queue capacity for a doctor or service location on a date. For follow-up/old/review queue capacity, send patient_type as follow_up; this check is silent and should not use availability filler.
+- check_doctor_availability: check available slots or OPD queue capacity for a doctor or service location on a date. For follow-up/old/review queue capacity, send patient_type as follow_up and include the collected patient_name for the short acknowledgement.
 - get_doctors: get list of doctors, branches, districts, or service locations configured for this phone number`;
 
         let history = transcript.slice(0, -1).map((m) => ({
@@ -908,11 +913,19 @@ Tools available:
               (call) => call.name === 'book_appointment' && !bookingCompleted
             );
 
+            const queueAvailabilityCall = functionCalls.find(
+              (call) => isQueueCapacityCheck(call, userMessage)
+            );
+
             const hasAvailabilityCheck = functionCalls.some(
               (call) => call.name === 'check_doctor_availability' && !isQueueCapacityCheck(call, userMessage)
             );
 
-            if (hasNewBooking && !fillerSent) {
+            if (queueAvailabilityCall && !fillerSent) {
+              const acknowledgement = getQueueAvailabilityAcknowledgement(queueAvailabilityCall.args || {});
+              streamFillerToMillis(ws, streamId, acknowledgement);
+              fillerSent = true;
+            } else if (hasNewBooking && !fillerSent) {
               const bookingEndpoint = resolveEndpoint(callContext.booking_endpoint, callContext);
               const filler = isTankroEndpoint(bookingEndpoint)
                 ? 'एक मिनट, आपकी बुकिंग कर रही हूं...'

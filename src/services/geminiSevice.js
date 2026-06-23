@@ -143,6 +143,10 @@ const tools = [
               description:
                 'Medical queue checks only. Use "follow_up" when checking OPD queue availability for old/repeat/review patients. Leave empty for normal fixed-slot availability and new-patient bookings.',
             },
+            patient_name: {
+              type: SchemaType.STRING,
+              description: 'Collected patient name in English. Include it for medical queue checks so the agent can acknowledge the patient by name.',
+            },
             date: {
               type: SchemaType.STRING,
               description: 'Date to check in YYYY-MM-DD format.',
