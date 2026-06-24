@@ -52,30 +52,34 @@ function detectLanguage(text) {
 
   if (totalChars === 0) return 'hi';
 
-  const devanagariRatio = devanagariChars / totalChars;
-
   // Marathi-specific words/patterns
   const marathiKeywords = /आहे|पाहिजे|कधी|काय|कोण|वाजता|बरोबर|उद्या|परवा|नक्की|माफ करा|सांगाल|आपले|कृपया/;
   const isMarathi = marathiKeywords.test(text);
 
-  if (devanagariRatio > 0.5) {
+  // Any Devanagari is a strong Hindi/Marathi signal, even when most words are
+  // domain terms in English, for example "Follow up patient है".
+  if (devanagariChars > 0) {
     return isMarathi ? 'mr' : 'hi';
   }
 
-  // Mostly Latin → English
-  if (devanagariRatio < 0.2) {
+  if (latinChars > 0) {
     return 'en';
   }
 
-  // Mixed (Hinglish/Marglish) — default to Hindi
   return 'hi';
 }
 
-// These short replies express booking intent, not the caller's language.
-// Keep the language established earlier in the call for these replies.
-function isLanguageNeutralReply(text) {
-  return /^(?:follow[\s-]?up(?:\s+patient)?|new(?:\s+patient)?|old(?:\s+patient)?|review|yes|yeah|sure|ok(?:ay)?|correct|right|no)[.!?]*$/i
-    .test(String(text || '').trim());
+function getConversationLanguage(transcript, fallbackText, previousLanguage) {
+  // Filler is assistant speech, so keep it consistent with the most recent
+  // assistant turn instead of guessing from a short/mixed user reply.
+  for (let index = transcript.length - 1; index >= 0; index--) {
+    const turn = transcript[index];
+    if (turn?.role === 'assistant' && String(turn.content || '').trim()) {
+      return detectLanguage(turn.content);
+    }
+  }
+
+  return previousLanguage || detectLanguage(fallbackText);
 }
 
 // ============================================================
@@ -1017,15 +1021,14 @@ function handleConnection(ws, req) {
 
         console.log('User said:', userMessage);
 
-        // Keep the conversation language stable when the caller only says a
-        // confirmation or domain term such as "follow up".
+        // Keep filler speech in the language used by the assistant in the
+        // ongoing conversation; the latest user reply may be short or mixed.
         const detectedLang = detectLanguage(userMessage);
-        if (
-          !callContext.preferred_language ||
-          !isLanguageNeutralReply(userMessage)
-        ) {
-          callContext.preferred_language = detectedLang;
-        }
+        callContext.preferred_language = getConversationLanguage(
+          transcript.slice(0, -1),
+          userMessage,
+          callContext.preferred_language
+        );
         const userLang = callContext.preferred_language;
         console.log(`[LANG] Detected: ${detectedLang}; using: ${userLang}`);
 
