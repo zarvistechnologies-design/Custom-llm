@@ -71,6 +71,13 @@ function detectLanguage(text) {
   return 'hi';
 }
 
+// These short replies express booking intent, not the caller's language.
+// Keep the language established earlier in the call for these replies.
+function isLanguageNeutralReply(text) {
+  return /^(?:follow[\s-]?up(?:\s+patient)?|new(?:\s+patient)?|old(?:\s+patient)?|review|yes|yeah|sure|ok(?:ay)?|correct|right|no)[.!?]*$/i
+    .test(String(text || '').trim());
+}
+
 // ============================================================
 // ⚡ FILLER MESSAGES per language (random pick for variety)
 // ============================================================
@@ -934,6 +941,7 @@ function handleConnection(ws, req) {
     in_flight_checks: new Map(),
     availability_call_count: 0,
     selected_appointment_date: null,
+    preferred_language: null,
   };
 
   let clinicConfig = null;
@@ -1009,9 +1017,17 @@ function handleConnection(ws, req) {
 
         console.log('User said:', userMessage);
 
-        // ⚡ Detect language from user message
-        const userLang = detectLanguage(userMessage);
-        console.log(`[LANG] Detected: ${userLang}`);
+        // Keep the conversation language stable when the caller only says a
+        // confirmation or domain term such as "follow up".
+        const detectedLang = detectLanguage(userMessage);
+        if (
+          !callContext.preferred_language ||
+          !isLanguageNeutralReply(userMessage)
+        ) {
+          callContext.preferred_language = detectedLang;
+        }
+        const userLang = callContext.preferred_language;
+        console.log(`[LANG] Detected: ${detectedLang}; using: ${userLang}`);
 
         if (
           normalizePatientType(userMessage) === 'follow_up' &&
