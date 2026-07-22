@@ -52,14 +52,10 @@ function detectLanguage(text) {
 
   if (totalChars === 0) return 'hi';
 
-  // Marathi-specific words/patterns
-  const marathiKeywords = /आहे|पाहिजे|कधी|काय|कोण|वाजता|बरोबर|उद्या|परवा|नक्की|माफ करा|सांगाल|आपले|कृपया/;
-  const isMarathi = marathiKeywords.test(text);
-
-  // Any Devanagari is a strong Hindi/Marathi signal, even when most words are
+  // Any Devanagari is a strong Hindi signal, even when most words are
   // domain terms in English, for example "Follow up patient है".
   if (devanagariChars > 0) {
-    return isMarathi ? 'mr' : 'hi';
+    return 'hi';
   }
 
   if (latinChars > 0) {
@@ -90,11 +86,6 @@ const FILLERS = {
     'एक पल, आपका अपॉइंटमेंट बुक कर रही हूं...',
     'बस एक मिनट, आपका नंबर लगा रही हूं...',
   ],
-  mr: [
-    'एक मिनिट, तुमचा नंबर लावत आहे...',
-    'थांबा, बुक करत आहे...',
-    'ठीक आहे, अपॉइंटमेंट लावत आहे...',
-  ],
   en: [
     'One moment, booking your appointment...',
     'Just a second, getting your slot booked...',
@@ -114,10 +105,6 @@ const AVAILABILITY_FILLERS = {
   hi: [
     'एक पल, उपलब्धता चेक कर रही हूं...',
     'रुकिए, स्लॉट्स देख रही हूं...',
-  ],
-  mr: [
-    'एक मिनिट, उपलब्धता तपासत आहे...',
-    'थांबा, स्लॉट तपासत आहे...',
   ],
   en: [
     'One moment, checking availability...',
@@ -1144,12 +1131,10 @@ Tools available:
               const nextQuestion = patientNameKnown
                 ? (userLang === 'en'
                     ? 'Is the patient new or follow-up?'
-                    : (userLang === 'mr'
-                        ? 'Patient nava aahe ki follow-up?'
-                        : 'मरीज़ पहली बार आ रहे हैं या पुराने हैं?'))
+                    : 'मरीज़ पहली बार आ रहे हैं या पुराने हैं?')
                 : (userLang === 'en'
                     ? 'What is the patient name?'
-                    : (userLang === 'mr' ? 'Patientche naav kay aahe?' : 'आपका नाम क्या है?'));
+                    : 'आपका नाम क्या है?');
               streamTextToMillis(ws, streamId, nextQuestion);
               console.log('[QUEUE_BACKGROUND] Next booking question sent without waiting');
               return;
